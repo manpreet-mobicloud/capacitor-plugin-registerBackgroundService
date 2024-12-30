@@ -1,7 +1,7 @@
 {
   "name": "capacitor-plugin-backgroundservice",
   "version": "0.0.1",
-  "description": "This plugin is to start application as foreground service to run in background continously even if the app is killed.",
+  "description": "Plugin to start application as foreground service to run in background continously even if the app is killed or device is rebooted",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
@@ -27,7 +27,8 @@
   "keywords": [
     "capacitor",
     "plugin",
-    "native"
+    "native",
+    "BackgroundService"
   ],
   "scripts": {
     "verify": "npm run verify:ios && npm run verify:android && npm run verify:web",
