@@ -1,6 +1,10 @@
 # capacitor-plugin-backgroundservice
 
-This plugin is to start application as foreground service to run in background continously even if the app is killed.
+This plugin is designed to start the application as a foreground service, allowing it to run continuously in the background even if the app is killed. It also ensures the service restarts automatically when the Android device is booted or restarted.
+
+# Important Note
+
+This plugin does not expose any explicit methods for use in JavaScript. All functionality is handled natively through Java code and configurations in the Android manifest file. You will need to set up the required native components to enable and customize the background service behavior.
 
 ## Install
 
@@ -13,25 +17,13 @@ npx cap sync
 
 <docgen-index>
 
-* [`echo(...)`](#echo)
+
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
-### echo(...)
 
-```typescript
-echo(options: { value: string; }) => Promise<{ value: string; }>
-```
-
-| Param         | Type                            |
-| ------------- | ------------------------------- |
-| **`options`** | <code>{ value: string; }</code> |
-
-**Returns:** <code>Promise&lt;{ value: string; }&gt;</code>
-
---------------------
 
 </docgen-api>
