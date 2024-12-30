@@ -9,14 +9,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "BackgroundService")
 public class BackgroundServicePlugin extends Plugin {
 
-    private BackgroundService implementation = new BackgroundService();
-
-    @PluginMethod
-    public void echo(PluginCall call) {
-        String value = call.getString("value");
-
-        JSObject ret = new JSObject();
-        ret.put("value", implementation.echo(value));
-        call.resolve(ret);
-    }
+//    private BackgroundService implementation = new BackgroundService();
+//
+//    @PluginMethod
+//    public void echo(PluginCall call) {
+//        String value = call.getString("value");
+//
+//        JSObject ret = new JSObject();
+//        ret.put("value", implementation.echo(value));
+//        call.resolve(ret);
+//    }
 }

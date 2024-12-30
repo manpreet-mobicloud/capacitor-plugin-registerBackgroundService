@@ -1,2 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+        <!-- Background service for Bluetooth and data syncing -->
+        <application>
+                <service
+                    android:name="com.mobicloud.plugins.backgroundservice.BackgroundService"
+                    android:foregroundServiceType="location|dataSync"
+                    android:exported="false"
+                    android:enabled="true" />
+        </application>
 </manifest>
