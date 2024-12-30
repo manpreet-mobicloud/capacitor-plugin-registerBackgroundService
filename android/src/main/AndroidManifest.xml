@@ -6,5 +6,15 @@
                     android:foregroundServiceType="location|dataSync"
                     android:exported="false"
                     android:enabled="true" />
+
+                <receiver
+                        android:name="com.mobicloud.plugins.broadcastreceiverservice.BootReceiver"
+                        android:enabled="true"
+                        android:exported="false"
+                        android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+                        <intent-filter>
+                        <action android:name="android.intent.action.BOOT_COMPLETED" />
+                        </intent-filter>
+                </receiver>
         </application>
 </manifest>
