@@ -1,6 +1,7 @@
 package com.mobicloud.plugins.backgroundservice;
 
 import android.annotation.SuppressLint;
+import android.app.AlarmManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -64,14 +65,13 @@ public class BackgroundService extends Service {
   }
 
   private void startForegroundService() throws ClassNotFoundException {
-//    Class<?> mainActivityClass = Class.forName("com.tatacommunications.fe_sa.MainActivity");
-    Intent notificationIntent = new Intent(this, com.tatacommunications.fe_sa.MainActivity.class);
+    Intent notificationIntent = new Intent(this, com.mobicloud.plugins.MainActivity.class);
     PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
 
     NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle("TCL")
+      .setContentTitle("Gas Regulator")
       .setContentText("Services are running in the background.")
-      .setSmallIcon(R.mipmap.ic_launcher_round)
+      .setSmallIcon(R.mipmap.ic_launcher)
       .setContentIntent(pendingIntent)
       .setOngoing(true)  // Makes the notification persistent
       .setPriority(NotificationCompat.PRIORITY_HIGH);
@@ -102,10 +102,10 @@ public class BackgroundService extends Service {
       if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction())) {
         int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
         if (state == BluetoothAdapter.STATE_ON) {
-          updateForegroundNotification("TCL", "Services are running in the background.");
+          updateForegroundNotification("Gas Regulator", "Services are running in the background.");
           removeBluetoothNotification();
         } else if (state == BluetoothAdapter.STATE_OFF) {
-          updateForegroundNotification("TCL - Bluetooth Alert", "Please turn on your Bluetooth.");
+          updateForegroundNotification("Gas Regulator - Bluetooth Alert", "Please turn on your Bluetooth.");
           sendBluetoothNotification();
         }
       }
@@ -115,10 +115,10 @@ public class BackgroundService extends Service {
   private void checkInitialBluetoothState() {
     if (bluetoothAdapter != null) {
       if (bluetoothAdapter.isEnabled()) {
-        updateForegroundNotification("TCL", "Services are running in the background.");
+        updateForegroundNotification("Gas Regulator", "Services are running in the background.");
         removeBluetoothNotification();
       } else {
-        updateForegroundNotification("TCL - Bluetooth Alert", "Please turn on your Bluetooth.");
+        updateForegroundNotification("Gas Regulator - Bluetooth Alert", "Please turn on your Bluetooth.");
         sendBluetoothNotification();
       }
     }
@@ -127,9 +127,9 @@ public class BackgroundService extends Service {
   @SuppressLint("ObsoleteSdkInt")
   private void sendBluetoothNotification() {
     NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle("TCL - Bluetooth Alert")
+      .setContentTitle("Gas Regulator - Bluetooth Alert")
       .setContentText("Please turn on your Bluetooth.")
-      .setSmallIcon(R.mipmap.ic_launcher_round)
+      .setSmallIcon(R.mipmap.ic_launcher)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setOngoing(true) // Makes the notification persistent
       .setContentIntent(getBluetoothSettingsPendingIntent()); // Redirect to Bluetooth settings
@@ -148,7 +148,7 @@ public class BackgroundService extends Service {
     NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(content)
-      .setSmallIcon(R.mipmap.ic_launcher_round)
+      .setSmallIcon(R.mipmap.ic_launcher)
       .setOngoing(true) // Keeps the notification persistent
       .setPriority(NotificationCompat.PRIORITY_HIGH);
 
@@ -162,26 +162,46 @@ public class BackgroundService extends Service {
   }
 
   @SuppressLint("ObsoleteSdkInt")
-  private void removeBluetoothNotification() {
+  private void removeBluetoothNotification() 
+  {
     NotificationManager manager = null;
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) 
+    {
       manager = getSystemService(NotificationManager.class);
     }
-    if (manager != null) {
+    if (manager != null) 
+    {
       manager.cancel(NOTIFICATION_ID);
     }
   }
 
-  private PendingIntent getBluetoothSettingsPendingIntent() {
+  private PendingIntent getBluetoothSettingsPendingIntent() 
+  {
     Intent intent = new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS);
     return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
   }
 
   @Override
-  public void onDestroy() {
+  public void onDestroy() 
+  {
     super.onDestroy();
-    if (bluetoothStateReceiver != null) {
+    if (bluetoothStateReceiver != null) 
+    {
       unregisterReceiver(bluetoothStateReceiver); // Unregister Bluetooth receiver
     }
+    restartService();
+  }
+
+  private void restartService() 
+  {
+      Intent restartServiceIntent = new Intent(getApplicationContext(), BackgroundService.class);
+      PendingIntent restartServicePendingIntent = PendingIntent.getService(this,1,restartServiceIntent,PendingIntent.FLAG_IMMUTABLE);
+
+      AlarmManager alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+      if (alarmManager != null) 
+      {
+        long restartTime = System.currentTimeMillis() + 1000; // Restart after 1 second
+        alarmManager.set(AlarmManager.RTC_WAKEUP, restartTime, restartServicePendingIntent);
+      }
   }
 }
