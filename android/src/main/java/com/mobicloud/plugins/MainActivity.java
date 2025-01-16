@@ -6,12 +6,10 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.widget.Toast;
-
-import androidx.annotation.NonNull;
-import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -22,8 +20,6 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-
-    // Check and request necessary permissions at runtime
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       if (checkAndRequestPermissions()) {
         // Start the background service if permissions are granted
@@ -32,8 +28,7 @@ public class MainActivity extends BridgeActivity {
     }
   }
 
-  // Function to check if all required permissions are granted, and request them if not
-  @RequiresApi(api = Build.VERSION_CODES.TIRAMISU)
+ @RequiresApi(api = Build.VERSION_CODES.TIRAMISU)
   private boolean checkAndRequestPermissions() {
     boolean isNotificationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
     boolean isBluetoothScanGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
