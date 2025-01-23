@@ -17,13 +17,21 @@ npx cap sync
 
 <docgen-index>
 
-
+* [`requestNotificationPermission()`](#requestnotificationpermission)
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
+### requestNotificationPermission()
 
+```typescript
+requestNotificationPermission() => Promise<{ granted: boolean; }>
+```
+
+**Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
+
+--------------------
 
 </docgen-api>
