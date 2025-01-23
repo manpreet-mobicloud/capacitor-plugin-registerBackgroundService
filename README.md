@@ -17,20 +17,70 @@ npx cap sync
 
 <docgen-index>
 
-* [`requestNotificationPermission()`](#requestnotificationpermission)
+* [`echo(...)`](#echo)
+* [`connectToBroker()`](#connecttobroker)
+* [`subscribeToTopic(...)`](#subscribetotopic)
+* [`publishMessage(...)`](#publishmessage)
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
-### requestNotificationPermission()
+### echo(...)
 
 ```typescript
-requestNotificationPermission() => Promise<{ granted: boolean; }>
+echo(options: { value: string; }) => Promise<{ value: string; }>
 ```
 
-**Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
+Echo the given string.
+
+| Param         | Type                            | Description |
+| ------------- | ------------------------------- | ----------- |
+| **`options`** | <code>{ value: string; }</code> | : string }  |
+
+**Returns:** <code>Promise&lt;{ value: string; }&gt;</code>
+
+--------------------
+
+
+### connectToBroker()
+
+```typescript
+connectToBroker() => Promise<void>
+```
+
+Connect to the MQTT broker.
+
+--------------------
+
+
+### subscribeToTopic(...)
+
+```typescript
+subscribeToTopic(options: { topic: string; }) => Promise<void>
+```
+
+Subscribe to an MQTT topic.
+
+| Param         | Type                            | Description |
+| ------------- | ------------------------------- | ----------- |
+| **`options`** | <code>{ topic: string; }</code> | : string }  |
+
+--------------------
+
+
+### publishMessage(...)
+
+```typescript
+publishMessage(options: { topic: string; message: string; }) => Promise<void>
+```
+
+Publish a message to an MQTT topic.
+
+| Param         | Type                                             | Description |
+| ------------- | ------------------------------------------------ | ----------- |
+| **`options`** | <code>{ topic: string; message: string; }</code> | : string }  |
 
 --------------------
 
