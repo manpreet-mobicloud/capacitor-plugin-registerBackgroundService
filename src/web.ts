@@ -18,9 +18,7 @@ export class BackgroundServiceWeb extends WebPlugin implements BackgroundService
   }
 
   async requestNotificationPermission(): Promise<{ granted: boolean }> {
-
     return { granted: false };
-
   }
 
 }
