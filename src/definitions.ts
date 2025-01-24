@@ -1,4 +1,5 @@
 export interface BackgroundServicePlugin {
+
     /**
      * Echo the given string.
      * @param options { value: string }
@@ -21,5 +22,14 @@ export interface BackgroundServicePlugin {
      * @param options { message: string }
      */
     publishMessage(options: { topic:string, message: string }): Promise<void>;
-  }
-  
+
+  /**
+     * Request notification permissions.
+     * Requests the user's permission to send notifications.
+     * 
+     * @returns A promise that resolves with the result of the permission request.
+     *          - `granted`: A boolean indicating whether the permission was granted.
+     */
+    requestNotificationPermission(): Promise<{ granted: boolean }>;
+    
+}

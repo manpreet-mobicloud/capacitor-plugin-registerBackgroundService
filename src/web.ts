@@ -16,4 +16,9 @@ export class BackgroundServiceWeb extends WebPlugin implements BackgroundService
     console.log('ECHO', options);
     return options;
   }
+
+  async requestNotificationPermission(): Promise<{ granted: boolean }> {
+    return { granted: false };
+  }
+
 }
