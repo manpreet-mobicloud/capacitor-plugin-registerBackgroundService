@@ -74,7 +74,7 @@ public class BackgroundServicePlugin extends Plugin {
       PendingIntent pendingIntent = PendingIntent.getActivity(getContext(), 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
       NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), CHANNEL_ID)
-        .setSmallIcon(R.mipmap.ic_launcher_2)
+        .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle(title)
         .setContentText(message)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
