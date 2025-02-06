@@ -21,6 +21,7 @@ npx cap sync
 * [`connectToBroker()`](#connecttobroker)
 * [`subscribeToTopic(...)`](#subscribetotopic)
 * [`publishMessage(...)`](#publishmessage)
+* [`requestNotificationPermission()`](#requestnotificationpermission)
 
 </docgen-index>
 
@@ -81,6 +82,20 @@ Publish a message to an MQTT topic.
 | Param         | Type                                             | Description |
 | ------------- | ------------------------------------------------ | ----------- |
 | **`options`** | <code>{ topic: string; message: string; }</code> | : string }  |
+
+--------------------
+
+
+### requestNotificationPermission()
+
+```typescript
+requestNotificationPermission() => Promise<{ granted: boolean; }>
+```
+
+Request notification permissions.
+Requests the user's permission to send notifications.
+
+**Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
 
 --------------------
 
