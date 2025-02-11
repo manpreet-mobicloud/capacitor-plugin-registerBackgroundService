@@ -6,10 +6,10 @@ export class BackgroundServiceWeb extends WebPlugin implements BackgroundService
   connectToBroker(): Promise<void> {
     throw new Error('Method not implemented.');
   }
-  subscribeToTopic(_options: { topic: string; }): Promise<void> {
+  subscribeToTopic(_options: { topic: string }): Promise<void> {
     throw new Error('Method not implemented.');
   }
-  publishMessage(_options: { message: string; }): Promise<void> {
+  publishMessage(_options: { topic:string, message: JSON }): Promise<void> {
     throw new Error('Method not implemented.');
   }
   async echo(options: { value: string }): Promise<{ value: string }> {

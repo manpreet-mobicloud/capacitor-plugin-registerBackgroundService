@@ -9,7 +9,7 @@ export interface BackgroundServicePlugin {
     /**
      * Connect to the MQTT broker.
      */
-    connectToBroker(): Promise<void>;
+    connectToBroker(options:{BrokerUrl:string,username:string,password:string}): Promise<void>;
   
     /**
      * Subscribe to an MQTT topic.
@@ -19,9 +19,9 @@ export interface BackgroundServicePlugin {
   
     /**
      * Publish a message to an MQTT topic.
-     * @param options { message: string }
+     * @param options { topic:string, message: string }
      */
-    publishMessage(options: { topic:string, message: string }): Promise<void>;
+    publishMessage(options: { topic:string, message: JSON }): Promise<void>;
 
   /**
      * Request notification permissions.

@@ -32,7 +32,9 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import info.mqtt.android.service.Ack;
@@ -51,11 +53,11 @@ public class BackgroundServicePlugin extends Plugin {
     // Define max inflight messages
     int maxInflight = 10;
 
-    private static final String BROKER_URL = "ssl://platform.iot.tatacommunications.com:8883"; // Replace with your MQTT broker URL and port
-    private static final String USERNAME = "fe_regulator"; // Replace with your username
-    private static final String PASSWORD = "FeRegulator@123"; // Replace with your password
-    private static final String TOPIC_to_Subscribe = "send/command";
-    private static final String TOPIC_to_Publish = "devices/status";
+    private static String BROKER_URL = ""; // Replace with your MQTT broker URL and port
+    private static String USERNAME = ""; // Replace with your username
+    private static String PASSWORD = ""; // Replace with your password
+    private static String TOPIC_to_Subscribe = " ";
+    private static String TOPIC_to_Publish = " ";
     private MqttAndroidClient mqttAndroidClient;
 
     private void createNotificationChannel() {
@@ -98,7 +100,10 @@ public class BackgroundServicePlugin extends Plugin {
     @PluginMethod
     public void connectToBroker(PluginCall call)
     {
-        String message = "Hello MQTT Broker,from mobicloud!!!";
+        BROKER_URL = call.getString("BrokerUrl");
+        USERNAME = call.getString("username");
+        PASSWORD = call.getString("password");
+
         createNotificationChannel(); // Ensure notification channel exists
 
         Context appcontext = this.getActivity().getApplicationContext();
@@ -179,17 +184,19 @@ public class BackgroundServicePlugin extends Plugin {
             return;
         }
 
-        String topic = call.getString("topic");
-        if (topic == null || topic.isEmpty()) {
+        TOPIC_to_Subscribe = call.getString("topic");
+        
+        if (TOPIC_to_Subscribe == null || TOPIC_to_Subscribe.isEmpty()) {
             call.reject("Topic is required");
             return;
         }
 
-        mqttAndroidClient.subscribe(topic, 1, null, new IMqttActionListener() {
+        mqttAndroidClient.subscribe(TOPIC_to_Subscribe, 1, getContext(), new IMqttActionListener() {
             @Override
             public void onSuccess(IMqttToken asyncActionToken) {
-                Log.d(TAG, "Subscribed to topic: " + topic);
-                showNotification("MQTT Downlink - Status", "Subscribed to topic: "+topic);
+                Log.d(TAG, "Subscribed to topic: " + TOPIC_to_Subscribe);
+                System.out.println("Subscribed to topic: " + TOPIC_to_Subscribe);
+                showNotification("MQTT Downlink - Status", "Subscribed to topic: "+TOPIC_to_Subscribe);
                 JSObject result = new JSObject();
                 result.put("status", "Subscribed successfully");
                 call.resolve(result);
@@ -197,7 +204,7 @@ public class BackgroundServicePlugin extends Plugin {
 
             @Override
             public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-                Log.e(TAG, "Failed to subscribe to topic: " + topic, exception);
+                Log.e(TAG, "Failed to subscribe to topic: " + TOPIC_to_Subscribe, exception);
                 call.reject("Failed to subscribe to topic");
             }
         });
@@ -206,43 +213,63 @@ public class BackgroundServicePlugin extends Plugin {
     @PluginMethod
     public void publishMessage(PluginCall call) {
         // Retrieve topic and message from the PluginCall
-        String topic = call.getString("topic");
-        String message = call.getString("message");
+        TOPIC_to_Publish = call.getString("topic");
+        JSObject messageObject = call.getObject("message");
 
-        if (topic == null || topic.isEmpty()) {
+        if (TOPIC_to_Publish == null || TOPIC_to_Publish.isEmpty()) {
             call.reject("Topic is required");
             return;
         }
 
-        if (message == null || message.isEmpty()) {
+        if (messageObject == null) {
             call.reject("Message is required");
             return;
         }
 
-        // Check if the MQTT client is initialized and connected
-        if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
-            Log.e(TAG, "MQTT client is not connected.");
-            call.reject("MQTT client is not connected.");
-            return;
+        try {
+            // Convert JSObject to a proper JSON string
+            JSONObject jsonMessage = new JSONObject(messageObject.toString());
+            String messageString = jsonMessage.toString(); // Convert to JSON string
+
+            // Check if the MQTT client is initialized and connected
+            if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
+                Log.e(TAG, "MQTT client is not connected.");
+                call.reject("MQTT client is not connected.");
+                return;
+            }
+
+            // Create and configure MQTT message
+            MqttMessage mqttMessage = new MqttMessage(messageString.getBytes(StandardCharsets.UTF_8));
+            mqttMessage.setQos(1); // QoS level (0, 1, or 2)
+
+            // Publish the message
+            mqttAndroidClient.publish(TOPIC_to_Publish, mqttMessage,getContext(),new IMqttActionListener(){
+
+                @Override
+                public void onSuccess(IMqttToken asyncActionToken) {
+                    Log.d(TAG, "Message published to topic: " + TOPIC_to_Publish + " with payload: " + mqttMessage);
+                    showNotification("MQTT Uplink - Status", "Message Published Successfully");
+
+                    System.out.println("Message successfully published: " + mqttMessage);
+
+                    // Send success response to the JS side
+                    JSObject result = new JSObject();
+                    result.put("status", "Message published successfully");
+                    result.put("topic", TOPIC_to_Publish);
+                    call.resolve(result);
+                }
+
+                @Override
+                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                    Log.d(TAG, "Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageString);
+                    showNotification("MQTT Uplink - Status", "Failed to publish message");
+
+                    System.out.println("Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageString);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to publish MQTT message", e);
+            call.reject("Failed to publish MQTT message: " + e.getMessage());
         }
-
-        // Create and configure MQTT message
-        MqttMessage mqttMessage = new MqttMessage(message.getBytes());
-        mqttMessage.setQos(1); // QoS level (0, 1, or 2)
-
-        // Publish the message
-        mqttAndroidClient.publish(topic, mqttMessage);
-
-        Log.d(TAG, "Message published to topic: " + topic + " with payload: " + message);
-        showNotification("MQTT Uplink - Status", "Message Published Successfully");
-
-        System.out.println("Message successfully published: " + mqttMessage);
-
-        // Send success response to the JS side
-        JSObject result = new JSObject();
-        result.put("status", "Message published successfully");
-        result.put("topic", topic);
-        call.resolve(result);
-
     }
 }
