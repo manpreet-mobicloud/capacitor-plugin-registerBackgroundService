@@ -11,16 +11,16 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
     
     // MQTT configuration
     private var mqttClient: CocoaMQTT?
-    private let brokerURL = "platform.iot.tatacommunications.com" // MQTT broker URL
     private let brokerPort: UInt16 = 8883 // MQTT broker port (SSL)
-    private let username = "fe_regulator" // MQTT username
-    private let password = "FeRegulator@123" // MQTT password
  
     // Bluetooth central manager
     private var centralManager: CBCentralManager!
     public let identifier = "BackgroundServicePlugin" // Plugin identifier
     public let jsName = "MqttService" // JS name for the plugin
  
+    private var topicToSubscribe: String = ""
+    private var topicToPublish: String = ""
+    
     // List of methods exposed to JavaScript
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "load", returnType: CAPPluginReturnPromise),
@@ -138,7 +138,14 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
  
     // Connect to the MQTT broker
     @objc func connectToBroker(_ call: CAPPluginCall) {
-        let clientID = "FE-Regulator-client-\(UUID().uuidString)" // Generate a unique client ID
+        guard let brokerURL = call.getString("iOSBrokerUrl"),
+              let username = call.getString("username"),
+              let password = call.getString("password") else {
+              call.reject("Broker URL, username, and password are required")
+              return
+        }
+    
+        let clientID = "FE-Regulator-client-\(UUID().uuidString)" // Unique client ID
         mqttClient = CocoaMQTT(clientID: clientID, host: brokerURL, port: brokerPort)
         
         guard let mqttClient = mqttClient else {
@@ -148,24 +155,28 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
         
         mqttClient.username = username
         mqttClient.password = password
-        mqttClient.keepAlive = 10
+        mqttClient.keepAlive = 60
         mqttClient.enableSSL = true
         mqttClient.autoReconnect = true
         
-        mqttClient.didConnectAck = { [weak self] mqtt, ack in
+        mqttClient.didConnectAck = { [weak self] _, ack in
             if ack == .accept {
+                self?.showNotification(title: "MQTT Connected", message: "Successfully connected to the broker.")
                 self?.notifyListeners("connected", data: ["status": "connected"], retainUntilConsumed: false)
                 call.resolve(["status": "connected"])
             } else {
+                self?.showNotification(title: "MQTT Connection Failed", message: "Failed to connect to broker.")
                 call.reject("Failed to connect to MQTT broker")
             }
         }
         
-        mqttClient.didDisconnect = { [weak self] mqtt, error in
+        mqttClient.didDisconnect = { [weak self] _, error in
+            self?.showNotification(title: "MQTT Disconnected", message: error?.localizedDescription ?? "Unknown reason")
             self?.notifyListeners("connectionLost", data: ["error": error?.localizedDescription ?? "Unknown error"], retainUntilConsumed: false)
         }
         
-        mqttClient.didReceiveMessage = { [weak self] mqtt, message, id in
+        mqttClient.didReceiveMessage = { [weak self] _, message, _ in
+            self?.showNotification(title: "New MQTT Message", message: "Topic: \(message.topic) | Message: \(message.string ?? "")")
             self?.notifyListeners("messageReceived", data: [
                 "topic": message.topic,
                 "payload": message.string ?? ""
@@ -174,7 +185,7 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
         
         mqttClient.connect()
     }
- 
+    
     // Subscribe to an MQTT topic
     @objc func subscribeToTopic(_ call: CAPPluginCall) {
         guard let mqttClient = mqttClient, mqttClient.connState == .connected else {
@@ -187,10 +198,12 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
             return
         }
         
+        topicToSubscribe = topic
         mqttClient.subscribe(topic, qos: .qos1)
+        showNotification(title: "MQTT Subscription", message: "Subscribed to topic: \(topic)")
         call.resolve(["status": "Subscribed to topic", "topic": topic])
     }
- 
+    
     // Publish a message to an MQTT topic
     @objc func publishMessage(_ call: CAPPluginCall) {
         guard let mqttClient = mqttClient, mqttClient.connState == .connected else {
@@ -204,14 +217,27 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
         }
         
         guard let messageObject = call.getObject("message"),
-            let messageData = try? JSONSerialization.data(withJSONObject: messageObject, options: []),
-            let messageString = String(data: messageData, encoding: .utf8) else {
+              let messageData = try? JSONSerialization.data(withJSONObject: messageObject, options: []),
+              let messageString = String(data: messageData, encoding: .utf8) else {
             call.reject("Message serialization failed")
             return
         }
         
+        topicToPublish = topic
         mqttClient.publish(topic, withString: messageString, qos: .qos1, retained: false)
-        call.resolve(["status": "Message published successfully", "topic": topic])
+        showNotification(title: "MQTT Uplink - Status", message: "Message published successfully to topic: \(topic)")
+        //call.resolve(["status": "Message published successfully", "topic": topic])
+    }
+    
+    // Display notifications for MQTT events
+    private func showNotification(title: String, message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = message
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 }
  
