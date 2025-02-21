@@ -11,10 +11,7 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
     
     // MQTT configuration
     private var mqttClient: CocoaMQTT?
-    private var brokerURL = "" // MQTT broker URL
     private let brokerPort: UInt16 = 8883 // MQTT broker port (SSL)
-    private var username = "" // MQTT username
-    private var password = "" // MQTT password
  
     // Bluetooth central manager
     private var centralManager: CBCentralManager!
@@ -141,19 +138,15 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
  
     // Connect to the MQTT broker
     @objc func connectToBroker(_ call: CAPPluginCall) {
-        guard let brokerURL = call.getString("BrokerUrl"),
+        guard let brokerURL = call.getString("iOSBrokerUrl"),
               let username = call.getString("username"),
               let password = call.getString("password") else {
-            call.reject("Broker URL, username, and password are required")
-            return
+              call.reject("Broker URL, username, and password are required")
+              return
         }
-        
-        self.brokerURL = brokerURL
-        self.username = username
-        self.password = password
-        
+    
         let clientID = "FE-Regulator-client-\(UUID().uuidString)" // Unique client ID
-        mqttClient = CocoaMQTT(clientID: clientID, host: brokerURL, port: 1883)
+        mqttClient = CocoaMQTT(clientID: clientID, host: brokerURL, port: brokerPort)
         
         guard let mqttClient = mqttClient else {
             call.reject("Failed to initialize MQTT client")
@@ -162,8 +155,8 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
         
         mqttClient.username = username
         mqttClient.password = password
-        mqttClient.keepAlive = 10
-        mqttClient.enableSSL = false
+        mqttClient.keepAlive = 60
+        mqttClient.enableSSL = true
         mqttClient.autoReconnect = true
         
         mqttClient.didConnectAck = { [weak self] _, ack in
@@ -233,7 +226,7 @@ public class BackgroundServicePlugin: CAPPlugin, CAPBridgedPlugin, CBCentralMana
         topicToPublish = topic
         mqttClient.publish(topic, withString: messageString, qos: .qos1, retained: false)
         showNotification(title: "MQTT Uplink - Status", message: "Message published successfully to topic: \(topic)")
-        call.resolve(["status": "Message published successfully", "topic": topic])
+        //call.resolve(["status": "Message published successfully", "topic": topic])
     }
     
     // Display notifications for MQTT events
