@@ -3,6 +3,21 @@ import { WebPlugin } from '@capacitor/core';
 import type { BackgroundServicePlugin } from './definitions';
 
 export class BackgroundServiceWeb extends WebPlugin implements BackgroundServicePlugin {
+  StartBackgroundService(_options: { 
+    deviceId:string,
+    BrokerUrl:string,
+    username:string,
+    password:string,
+    topicTOSubscribe:string,
+    topicTOpublish:string,
+    messageTOPublish:{
+      deviceId:string | null,
+      message:string
+    }
+  }): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+
   connectToBroker(): Promise<void> {
     throw new Error('Method not implemented.');
   }

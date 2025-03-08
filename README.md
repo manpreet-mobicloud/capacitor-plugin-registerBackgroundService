@@ -17,76 +17,25 @@ npx cap sync
 
 <docgen-index>
 
-* [`echo(...)`](#echo)
-* [`connectToBroker(...)`](#connecttobroker)
-* [`subscribeToTopic(...)`](#subscribetotopic)
-* [`publishMessage(...)`](#publishmessage)
+* [`StartBackgroundService(...)`](#startbackgroundservice)
 * [`requestNotificationPermission()`](#requestnotificationpermission)
-* [Interfaces](#interfaces)
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
-### echo(...)
+### StartBackgroundService(...)
 
 ```typescript
-echo(options: { value: string; }) => Promise<{ value: string; }>
+StartBackgroundService(options: { deviceId: string; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; messageTOPublish: { deviceId: string | null; message: string; }; }) => Promise<void>
 ```
 
-Echo the given string.
+Start Background Service.
 
-| Param         | Type                            | Description |
-| ------------- | ------------------------------- | ----------- |
-| **`options`** | <code>{ value: string; }</code> | : string }  |
-
-**Returns:** <code>Promise&lt;{ value: string; }&gt;</code>
-
---------------------
-
-
-### connectToBroker(...)
-
-```typescript
-connectToBroker(options: { BrokerUrl: string; username: string; password: string; }) => Promise<void>
-```
-
-Connect to the MQTT broker.
-
-| Param         | Type                                                                    |
-| ------------- | ----------------------------------------------------------------------- |
-| **`options`** | <code>{ BrokerUrl: string; username: string; password: string; }</code> |
-
---------------------
-
-
-### subscribeToTopic(...)
-
-```typescript
-subscribeToTopic(options: { topic: string; }) => Promise<void>
-```
-
-Subscribe to an MQTT topic.
-
-| Param         | Type                            | Description |
-| ------------- | ------------------------------- | ----------- |
-| **`options`** | <code>{ topic: string; }</code> | : string }  |
-
---------------------
-
-
-### publishMessage(...)
-
-```typescript
-publishMessage(options: { topic: string; message: JSON; }) => Promise<void>
-```
-
-Publish a message to an MQTT topic.
-
-| Param         | Type                                                               | Description                |
-| ------------- | ------------------------------------------------------------------ | -------------------------- |
-| **`options`** | <code>{ topic: string; message: <a href="#json">JSON</a>; }</code> | :string, message: string } |
+| Param         | Type                                                                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`options`** | <code>{ deviceId: string; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; messageTOPublish: { deviceId: string \| null; message: string; }; }</code> |
 
 --------------------
 
@@ -103,19 +52,5 @@ Requests the user's permission to send notifications.
 **Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
 
 --------------------
-
-
-### Interfaces
-
-
-#### JSON
-
-An intrinsic object that provides functions to convert JavaScript values to and from the JavaScript Object Notation (<a href="#json">JSON</a>) format.
-
-| Method        | Signature                                                                                                                                  | Description                                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| **parse**     | (text: string, reviver?: ((this: any, key: string, value: any) =&gt; any) \| undefined) =&gt; any                                          | Converts a JavaScript Object Notation (<a href="#json">JSON</a>) string into an object.        |
-| **stringify** | (value: any, replacer?: ((this: any, key: string, value: any) =&gt; any) \| undefined, space?: string \| number \| undefined) =&gt; string | Converts a JavaScript value to a JavaScript Object Notation (<a href="#json">JSON</a>) string. |
-| **stringify** | (value: any, replacer?: (string \| number)[] \| null \| undefined, space?: string \| number \| undefined) =&gt; string                     | Converts a JavaScript value to a JavaScript Object Notation (<a href="#json">JSON</a>) string. |
 
 </docgen-api>
