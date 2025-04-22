@@ -19,6 +19,8 @@ npx cap sync
 
 * [`StartBackgroundService(...)`](#startbackgroundservice)
 * [`requestNotificationPermission()`](#requestnotificationpermission)
+* [`addListener('onMqttMessage', ...)`](#addlisteneronmqttmessage-)
+* [Interfaces](#interfaces)
 
 </docgen-index>
 
@@ -28,14 +30,14 @@ npx cap sync
 ### StartBackgroundService(...)
 
 ```typescript
-StartBackgroundService(options: { deviceId: string; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; messageTOPublish: { deviceId: string | null; message: string; }; }) => Promise<void>
+StartBackgroundService(options: { baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string | null; macAddress: string | null; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; authTopicToSubscribe: string; authPayload: { parameters: { header: string; }; }; messageToPublishForAlerts: {}; messageToPublishForGasComsumtion: {}; }) => Promise<void>
 ```
 
 Start Background Service.
 
-| Param         | Type                                                                                                                                                                                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`options`** | <code>{ deviceId: string; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; messageTOPublish: { deviceId: string \| null; message: string; }; }</code> |
+| Param         | Type                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`options`** | <code>{ baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string \| null; macAddress: string \| null; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; authTopicToSubscribe: string; authPayload: { parameters: { header: string; }; }; messageToPublishForAlerts: {}; messageToPublishForGasComsumtion: {}; }</code> |
 
 --------------------
 
@@ -47,10 +49,37 @@ requestNotificationPermission() => Promise<{ granted: boolean; }>
 ```
 
 Request notification permissions.
-Requests the user's permission to send notifications.
 
 **Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
 
 --------------------
+
+
+### addListener('onMqttMessage', ...)
+
+```typescript
+addListener(eventName: 'onMqttMessage', listenerFunc: (data: { message: string; }) => void) => Promise<PluginListenerHandle>
+```
+
+Listen for MQTT messages from native background service.
+
+| Param              | Type                                                 |
+| ------------------ | ---------------------------------------------------- |
+| **`eventName`**    | <code>'onMqttMessage'</code>                         |
+| **`listenerFunc`** | <code>(data: { message: string; }) =&gt; void</code> |
+
+**Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
+
+--------------------
+
+
+### Interfaces
+
+
+#### PluginListenerHandle
+
+| Prop         | Type                                      |
+| ------------ | ----------------------------------------- |
+| **`remove`** | <code>() =&gt; Promise&lt;void&gt;</code> |
 
 </docgen-api>
