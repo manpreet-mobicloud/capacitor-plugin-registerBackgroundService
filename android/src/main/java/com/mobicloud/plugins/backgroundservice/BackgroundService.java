@@ -1,7 +1,5 @@
 package com.mobicloud.plugins.backgroundservice;
 
-import static android.content.ContentValues.TAG;
-
 import static java.security.AccessController.getContext;
 
 import android.Manifest;
@@ -13,6 +11,9 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -22,11 +23,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
@@ -49,11 +50,10 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -71,7 +71,6 @@ public class BackgroundService extends Service {
   private BluetoothStateReceiver bluetoothStateReceiver;
   private String macAddress;
   private BluetoothGatt bluetoothGatt;
-  private boolean isConnected = false;
 
   private boolean isDeviceConnected = false;
   private final AtomicBoolean isScanning = new AtomicBoolean(false);
@@ -87,22 +86,33 @@ public class BackgroundService extends Service {
   int maxInflight = 10;
 
   private static String DEVICE_TYPE = "";
-  private static String BROKER_URL = ""; // Replace with your MQTT broker URL and port
-  private static String USERNAME = ""; // Replace with your username
-  private static String PASSWORD = ""; // Replace with your password
-  private static String TOPIC_to_Subscribe = " ";
+
   private static String TOPIC_to_Publish = " ";
   private static String BASE_URL = "";
   private static String BASIC_AUTH = "";
   private static String DEVICE_UUID = "";
   private static String API_SUFFIX = "";
   private static String API_PAYLOAD = "";
-  private static String AUTH_TOPIC_TO_SUBSCRIBE = "";
-  private static String MessagetoPublishForAlerts = "";
+
+  private Context context;
+
+  private static String payloadData = "";
   private final Handler handler = new Handler(Looper.getMainLooper());
   private Long lastAuthDlTime = null; // set this when MQTT DL arrives
-  private static String MessagetoPublishForConsumtion = "";
+
   private MqttAndroidClient mqttAndroidClient;
+
+  private BluetoothGattCharacteristic txCharacteristic;
+
+  private final long READ_INTERVAL = 5000;  // 5 seconds
+
+  public BackgroundService() {
+    // Default empty constructor - Required by Android OS
+  }
+
+  public BackgroundService(Context context) {
+    this.context = context.getApplicationContext();  // Store the application context
+  }
 
   @Override
   public void onCreate() {
@@ -118,47 +128,24 @@ public class BackgroundService extends Service {
   public int onStartCommand(Intent intent, int flags, int startId) {
     Log.d(TAG, "Service started");
 
-    if(intent != null && intent.hasExtra("BrokerUrl"))
+    if(intent != null)
     {
       BASE_URL = intent.getStringExtra("baseURL");
       BASIC_AUTH = intent.getStringExtra("basicAuth");
       API_SUFFIX = intent.getStringExtra("apiSuffix");
       API_PAYLOAD = intent.getStringExtra("apiPayload");
       DEVICE_UUID = intent.getStringExtra("deviceUUID");
-      AUTH_TOPIC_TO_SUBSCRIBE = intent.getStringExtra("authTopicToSubscribe");
-      BROKER_URL = intent.getStringExtra("BrokerUrl");
-      USERNAME = intent.getStringExtra("username");
-      PASSWORD = intent.getStringExtra("password");
-      TOPIC_to_Subscribe = intent.getStringExtra("topicToSubscribe");
-      TOPIC_to_Publish = intent.getStringExtra("topicToPublish");
-      MessagetoPublishForAlerts = intent.getStringExtra("messageToPublishForAlerts");
-      MessagetoPublishForConsumtion = intent.getStringExtra("messageToPublishForGasComsumtion");
       DEVICE_TYPE = intent.getStringExtra("deviceType");
       macAddress = intent.getStringExtra("macAddress");
-      
-
-      // System.out.println("ABCD Mac Address: "+macAddress);
-      // System.out.println("ABCD Device Type is: "+DEVICE_TYPE);
 
       if(Objects.equals(DEVICE_TYPE, "BLE")) {
         checkInitialBluetoothState();
-        // Log.d(TAG, "Received macAddress: " + macAddress);
-        System.out.println("Received macAddress: "+macAddress);
-        connectToBroker();
-        // connectToDevice(macAddress);
-      } else {
-        connectToBroker();
+//        System.out.println("Received macAddress: "+macAddress);
+//
+//        connectToDevice(macAddress);
       }
     }
 
-  //   if (intent != null && intent.hasExtra("macAddress"))
-  //   {
-
-
-  //   } else {
-  //       Log.e(TAG, "No deviceId received!");
-  // //      connectToBroker();
-  //   }
     return START_STICKY;
   }
 
@@ -180,11 +167,8 @@ public class BackgroundService extends Service {
 
           String finalUrl = BASE_URL + DEVICE_UUID + API_SUFFIX;
           String finalAuthHeader = "Basic " + BASIC_AUTH;
-//
-//          System.out.println("Basic API Authorization is : " + finalAuthHeader);
-//          System.out.println("API Payload is: " + API_PAYLOAD);
-//          System.out.println("Final HTTP Request URL is : " + finalUrl);
 
+          System.out.println("Final Base Url is: "+finalUrl);
           sendHttpRequest(finalUrl, API_PAYLOAD, finalAuthHeader);
 
         } else {
@@ -198,17 +182,30 @@ public class BackgroundService extends Service {
     }
   };
 
-  private final Runnable messageUL = new Runnable() {
+  private final Runnable Uplinks = new Runnable() {
     @Override
     public void run() {
-      publishMessageForAlerts(TOPIC_to_Publish,MessagetoPublishForAlerts);
-      publishMessageForConsumtion(TOPIC_to_Publish,MessagetoPublishForConsumtion);
+      publishMessage(TOPIC_to_Publish,payloadData, new MqttUplinkCallBack() {
+        @Override
+        public void onSuccess() {
+        }
 
-      handler.postDelayed(messageUL,1800000); // check again after 30 minute
+        @Override
+        public void onFailure(Throwable exception) {
+        }
+      });
+      handler.postDelayed(Uplinks,1800000); // check again after 30 minute
     }
   };
 
   private void sendHttpRequest(String urlString, String jsonPayload, String authHeader) {
+    System.out.println(urlString);
+
+    if (urlString == null || urlString.trim().isEmpty()) {
+      Log.e("BackgroundService", "URL is empty or null, aborting HTTP request.");
+      return;  // Don't start the thread if URL is invalid
+    }
+
     new Thread(() -> {
         try {
             URL url = new URL(urlString);
@@ -229,7 +226,6 @@ public class BackgroundService extends Service {
               lastAuthDlTime = System.currentTimeMillis() / 1000;
             }
             Log.d("BackgroundService", "HTTP Response Code: " + responseCode);
-//            System.out.println("HTTPS Response Code is: "+responseCode);
             BufferedReader reader = new BufferedReader(new InputStreamReader(
                     responseCode >= 200 && responseCode < 300 ? conn.getInputStream() : conn.getErrorStream()));
             StringBuilder response = new StringBuilder();
@@ -238,9 +234,6 @@ public class BackgroundService extends Service {
                 response.append(line);
             }
             reader.close();
-
-//            Log.d("BackgroundService", "Response: " + response.toString());
-//            System.out.println("Response is : "+response.toString());
 
         } catch (Exception e) {
             Log.e("BackgroundService", "HTTP request failed", e);
@@ -325,48 +318,160 @@ public class BackgroundService extends Service {
     }
   }
 
-  private void connectToDevice(String address) {
-    if (bluetoothAdapter == null || address == null) {
-      Log.e(TAG, "BluetoothAdapter not initialized or invalid address.");
-      System.out.println("BluetoothAdapter not initialized or invalid address.");
-      return;
+  public void connectToDevice(String address) {
+    try {
+      if (bluetoothAdapter == null || address == null) {
+        Log.e(TAG, "BluetoothAdapter not initialized or invalid address.");
+        System.out.println("BluetoothAdapter not initialized or invalid address.");
+      }
+
+      BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+
+      if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+        Log.e(TAG, "BLUETOOTH_CONNECT permission missing.");
+        return;
+      }
+
+      bluetoothGatt = device.connectGatt(this, true, gattCallback);
+      Log.d(TAG, "Attempting to connect to BLE device: " + address);
+      System.out.println("Attempting to connect to BLE device: " + address);
+
+    } catch (IllegalArgumentException e) {
+      System.out.println(e);
+    } catch (Exception e) {
+      System.out.println("Exception occured while connecting to BLE device: "+e);
+      startScanningForDevice();
+    }
+  }
+
+  private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+
+    @Override
+    public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+      if (newState == BluetoothGatt.STATE_CONNECTED) {
+        Log.d(TAG, "Connected to BLE device.");
+        System.out.println("Connected to BLE device");
+
+        isDeviceConnected = true;
+        stopScanning();
+
+        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+          Log.e(TAG, "BLUETOOTH_CONNECT permission missing.");
+          return;
+        }
+
+        gatt.discoverServices();
+
+      } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
+        Log.d(TAG, "Disconnected from BLE device.");
+        stopPeriodicRead();
+        txCharacteristic = null;
+        isDeviceConnected = false;
+        startScanningForDevice();
+      }
     }
 
-    BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+    @Override
+    public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+      if (status == BluetoothGatt.GATT_SUCCESS) {
+        BluetoothGattService service = gatt.getService(Constants.NORDIC_SERVICE_UUID);
+        if (service != null) {
+
+          txCharacteristic = service.getCharacteristic(Constants.TX_CHARACTERISTIC_UUID);
+
+          if (txCharacteristic != null) {
+            readCharacteristic(txCharacteristic);
+            enableNotification(txCharacteristic);
+            startPeriodicRead();
+          } else {
+            Log.e(TAG, "TX Characteristic not found.");
+          }
+
+        } else {
+          Log.e(TAG, "Nordic UART service not found.");
+        }
+      } else {
+        Log.e(TAG, "Service discovery failed with status: " + status);
+      }
+    }
+
+    @Override
+    public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+      if (status == BluetoothGatt.GATT_SUCCESS) {
+        UUID uuid = characteristic.getUuid();
+        byte[] data = characteristic.getValue();
+        Log.d(TAG, "Data read from " + uuid + ": " + new String(data));
+      } else {
+        Log.e(TAG, "Read failed with status: " + status);
+      }
+    }
+
+    @Override
+    public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+      UUID uuid = characteristic.getUuid();
+      byte[] data = characteristic.getValue();
+      Log.d(TAG, "Notification received from " + uuid + ": " + new String(data));
+    }
+  };
+
+  private void readCharacteristic(BluetoothGattCharacteristic characteristic) {
+    if (bluetoothGatt == null) {
+      Log.e(TAG, "BluetoothGatt not initialized");
+      return;
+    }
 
     if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
       Log.e(TAG, "BLUETOOTH_CONNECT permission missing.");
       return;
     }
 
-    bluetoothGatt = device.connectGatt(this, false, gattCallback);
-    Log.d(TAG, "Attempting to connect to BLE device: " + address);
-    System.out.println("Attempting to connect to BLE device: " + address);
+    boolean readInitiated = bluetoothGatt.readCharacteristic(characteristic);
+    Log.d(TAG, "Read initiated: " + readInitiated + " for " + characteristic.getUuid());
   }
 
-  private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
-    @Override
-    public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-      if (newState == BluetoothGatt.STATE_CONNECTED) {
-        isConnected = true;
-        Log.d(TAG, "Connected to BLE device.");
-        System.out.println("Connected to BLE Device");
-        updateNotification("Connected to BLE device.");
-        isDeviceConnected = true;
-//        connectToBroker();
-        stopScanning();
-        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-          return;
-        }
+  private void enableNotification(BluetoothGattCharacteristic characteristic) {
+    if (bluetoothGatt == null) {
+      Log.e(TAG, "BluetoothGatt not initialized");
+      return;
+    }
 
-        gatt.discoverServices();
-      } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
-        isConnected = false;
-        Log.d(TAG, "Disconnected. Scanning for device...");
-        updateNotification("Disconnected. Searching for device...");
-        isDeviceConnected = false;
-        startScanningForDevice();
+    if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+      Log.e(TAG, "BLUETOOTH_CONNECT permission missing.");
+      return;
+    }
+
+    bluetoothGatt.setCharacteristicNotification(characteristic, true);
+
+    BluetoothGattDescriptor descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+    if (descriptor != null) {
+      descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+      bluetoothGatt.writeDescriptor(descriptor);
+      Log.d(TAG, "Notification enabled for characteristic: " + characteristic.getUuid());
+    } else {
+      Log.e(TAG, "Descriptor not found for characteristic: " + characteristic.getUuid());
+    }
+  }
+
+  private void startPeriodicRead() {
+    handler.postDelayed(readRunnable, READ_INTERVAL);
+    Log.d(TAG, "Started periodic read every " + READ_INTERVAL / 1000 + " seconds.");
+  }
+
+  private void stopPeriodicRead() {
+    handler.removeCallbacks(readRunnable);
+    Log.d(TAG, "Stopped periodic read.");
+  }
+
+  private final Runnable readRunnable = new Runnable() {
+    @Override
+    public void run() {
+      if (txCharacteristic != null && bluetoothGatt != null) {
+        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+          boolean readInitiated = bluetoothGatt.readCharacteristic(txCharacteristic);
+          Log.d(TAG, "Periodic read initiated: " + readInitiated);
+        }
       }
+      handler.postDelayed(this, READ_INTERVAL);
     }
   };
 
@@ -384,7 +489,6 @@ public class BackgroundService extends Service {
       IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
       getApplicationContext().registerReceiver(bluetoothStateReceiver, filter);
 
-//      isScanning.set(false);
       return;
     }
 
@@ -470,7 +574,6 @@ public class BackgroundService extends Service {
         int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
         if (state == BluetoothAdapter.STATE_ON) {
           updateNotification("Bluetooth enabled. Service active.");
-          startScanningForDevice();
         } else if (state == BluetoothAdapter.STATE_OFF) {
           sendBluetoothNotification();
         }
@@ -491,12 +594,9 @@ public class BackgroundService extends Service {
     }
   }
 
-  public void connectToBroker()
+  public void connectToBroker(String BROKER_URL, String USERNAME, String PASSWORD, MqttConnectionCallback callBack)
   {
-    Context appcontext = getApplicationContext();
-
-    //String clientId = "FE-Regulator-client";
-    this.mqttAndroidClient = new MqttAndroidClient(appcontext, BROKER_URL, MqttClient.generateClientId(), Ack.AUTO_ACK,persistence,useReconnect,maxInflight);
+    this.mqttAndroidClient = new MqttAndroidClient(this.context, BROKER_URL, MqttClient.generateClientId(), Ack.AUTO_ACK,persistence,useReconnect,maxInflight);
 
     MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
     mqttConnectOptions.setAutomaticReconnect(true);
@@ -509,40 +609,21 @@ public class BackgroundService extends Service {
       @Override
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Connected to broker");
-//        updateNotification("Successfully connected to the MQTT broker.");
-
         System.out.println("Connected to MQTT Broker");
-        subscribeToTopic(TOPIC_to_Subscribe);
-        subscribeToAuthTopic(AUTH_TOPIC_TO_SUBSCRIBE);
-        handler.post(authDlCheckRunnable);
-        handler.post(messageUL);
 
-//        if((BASE_URL != null) && (BASIC_AUTH != null) && (API_SUFFIX != null ) && (API_PAYLOAD != null) && (DEVICE_UUID != null)) {
-//          String finalUrl = BASE_URL + DEVICE_UUID + API_SUFFIX;
-//          String finalAuthHeader = "Basic "+BASIC_AUTH;
-//          System.out.println("Basic API Authorization is : "+finalAuthHeader);
-//          System.out.println("APi Payload is: "+API_PAYLOAD);
-//          System.out.println("Final HTTP Request URL is : " + finalUrl);
-//
-//          sendDynamicHttpRequest(finalUrl,API_PAYLOAD,finalAuthHeader);
-//        } else {
-//          System.out.println("Require All the Details of HTTP request, Missing!!!");
-//        }
-//        publishMessageForAlerts(TOPIC_to_Publish, MessagetoPublishForAlerts);
-//
-//        publishMessageForConsumtion(TOPIC_to_Publish,MessagetoPublishForConsumtion);
-        
-        // JSObject result = new JSObject();
-        // result.put("status","connected");
-        // call.resolve(result);
+        if (callBack != null) {
+          callBack.onConnectionSuccess();
+        }
       }
 
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to connect to broker", exception);
-//        updateNotification( "Failed to connect to MQTT broker.");
         System.out.println("Failed to connect to broker: "+exception);
-//                call.reject("Failed to connect to mqtt broker");
+
+        if (callBack != null) {
+          callBack.onConnectionFailure(exception);
+        }
       }
     });
 
@@ -558,7 +639,6 @@ public class BackgroundService extends Service {
         catch (MqttException e)
         {
           System.out.println("Exception Occurred While Reconnecting to MQTT Broker");
-//                    call.reject("Connection lost failed to reconnect");
           throw new RuntimeException(e);
 
         }
@@ -567,7 +647,6 @@ public class BackgroundService extends Service {
       @Override
       public void messageArrived(String topic, MqttMessage message) {
         Log.d(TAG, "Message received from topic: " + topic + " - " + new String(message.getPayload()));
-//        updateNotification("Received Topic: " + topic + " | Message: " + Arrays.toString(message.getPayload()));
         System.out.println("Message received from topic: "+ topic +" - "+new String(message.getPayload()));
 
         String msg = new String(message.getPayload());
@@ -587,15 +666,13 @@ public class BackgroundService extends Service {
     });
   }
 
-  public void subscribeToTopic(String topicToSubscribe) {
+  public void subscribeToTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {
     if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
       Log.e(TAG, "MQTT client is not connected or initialized.");
-//            call.reject("MQTT client is not connected or initialized.");
       return;
     }
 
     if (topicToSubscribe == null || topicToSubscribe.isEmpty()) {
-//            call.reject("Topic is required");
       return;
     }
 
@@ -604,29 +681,30 @@ public class BackgroundService extends Service {
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Subscribed to topic: " + topicToSubscribe);
         System.out.println("Subscribed to topic: " + topicToSubscribe);
-//        updateNotification("Subscribed to topic: "+TOPIC_to_Subscribe);
-        JSObject result = new JSObject();
-        result.put("status", "Subscribed successfully");
-//                call.resolve(result);
+
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onSuccess();
+        }
       }
 
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to subscribe to topic: " + topicToSubscribe, exception);
-//                call.reject("Failed to subscribe to topic");
+
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onFailure(exception);
+        }
       }
     });
   }
 
-  public void subscribeToAuthTopic(String topicToSubscribe) {
+  public void subscribeToAuthTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {
     if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
       Log.e(TAG, "MQTT client is not connected or initialized.");
-//            call.reject("MQTT client is not connected or initialized.");
       return;
     }
 
     if (topicToSubscribe == null || topicToSubscribe.isEmpty()) {
-//            call.reject("Topic is required");
       return;
     }
 
@@ -635,31 +713,38 @@ public class BackgroundService extends Service {
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Subscribed to topic: " + topicToSubscribe);
         System.out.println("Subscribed to topic: " + topicToSubscribe);
-//        updateNotification("Subscribed to topic: "+TOPIC_to_Subscribe);
-        JSObject result = new JSObject();
-        result.put("status", "Subscribed successfully");
-//                call.resolve(result);
+
+        handler.post(authDlCheckRunnable);
+
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onSuccess();
+        }
       }
 
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to subscribe to topic: " + topicToSubscribe, exception);
-//                call.reject("Failed to subscribe to topic");
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onFailure(exception);
+        }
       }
     });
   }
 
-  public void publishMessageForAlerts(String topicToPublish, String messageToPublish) {
+  public void publishMessage(String topicToPublish, String messageToPublish, MqttUplinkCallBack mqttUplinkCallBack) {
     // Retrieve topic and message from the PluginCall
+    TOPIC_to_Publish = topicToPublish;
+
+    payloadData = messageToPublish;
+
     System.out.print("Message to Publish : "+messageToPublish);
 
     if (topicToPublish == null || topicToPublish.isEmpty()) {
-//            call.reject("Topic is required");
       return;
     }
 
     if (messageToPublish == null) {
-//            call.reject("Message is required");
+      Log.e(TAG,"Empty Payload message cannot publish");
       return;
     }
 
@@ -668,7 +753,6 @@ public class BackgroundService extends Service {
       // Check if the MQTT client is initialized and connected
       if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
         Log.e(TAG, "MQTT client is not connected.");
-//                call.reject("MQTT client is not connected.");
         return;
       }
 
@@ -682,7 +766,6 @@ public class BackgroundService extends Service {
         @Override
         public void onSuccess(IMqttToken asyncActionToken) {
           Log.d(TAG, "Message published to topic: " + topicToPublish + " with payload: " + messageToPublish);
-//          updateNotification("Message Published Successfully");
 
           System.out.println("Message successfully published: " + messageToPublish);
 
@@ -690,86 +773,92 @@ public class BackgroundService extends Service {
           JSObject result = new JSObject();
           result.put("status", "Message published successfully");
           result.put("topic", topicToPublish);
-//                    call.resolve(result);
+          handler.post(Uplinks);
+
+          if(mqttUplinkCallBack != null) {
+            mqttUplinkCallBack.onSuccess();
+          }
         }
 
         @Override
         public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
           Log.d(TAG, "Failed to publish to topic: " + topicToPublish + " with payload: " + messageToPublish);
-//          updateNotification("Failed to publish message");
-
           System.out.println("Failed to publish to topic: " + topicToPublish + " with payload: " + messageToPublish);
+
+          if(mqttUplinkCallBack != null) {
+            mqttUplinkCallBack.onFailure(exception);
+          }
         }
       });
     } catch (Exception e) {
       Log.e(TAG, "Failed to publish MQTT message", e);
-            //call.reject("Failed to publish MQTT message: " + e.getMessage());
     }
   }
 
-  public void publishMessageForConsumtion(String topicToPublish, String messageToPublish) {
-    // Retrieve topic and message from the PluginCall
-    System.out.print("Message to Publish : "+messageToPublish);
-
-    if (topicToPublish == null || topicToPublish.isEmpty()) {
-//            call.reject("Topic is required");
-      return;
-    }
-
-    if (messageToPublish == null) {
-//            call.reject("Message is required");
-      return;
-    }
-
-    try {
-      // Convert JSObject to a proper JSON string
-      // Check if the MQTT client is initialized and connected
-      if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
-        Log.e(TAG, "MQTT client is not connected.");
-//                call.reject("MQTT client is not connected.");
-        return;
-      }
-
-      // Create and configure MQTT message
-      MqttMessage mqttMessage = new MqttMessage(messageToPublish.getBytes(StandardCharsets.UTF_8));
-      mqttMessage.setQos(1); // QoS level (0, 1, or 2)
-
-      // Publish the message
-      mqttAndroidClient.publish(topicToPublish, mqttMessage,getContext(),new IMqttActionListener(){
-
-        @Override
-        public void onSuccess(IMqttToken asyncActionToken) {
-          Log.d(TAG, "Message published to topic: " + topicToPublish + " with payload: " + messageToPublish);
-//          updateNotification("Message Published Successfully");
-
-          System.out.println("Message successfully published: " + messageToPublish);
-
-          // Send success response to the JS side
-          JSObject result = new JSObject();
-          result.put("status", "Message published successfully");
-          result.put("topic", topicToPublish);
-//                    call.resolve(result);
-        }
-
-        @Override
-        public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-          Log.d(TAG, "Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageToPublish);
-//          updateNotification("Failed to publish message");
-
-          System.out.println("Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageToPublish);
-        }
-      });
-    } catch (Exception e) {
-      Log.e(TAG, "Failed to publish MQTT message", e);
-//            call.reject("Failed to publish MQTT message: " + e.getMessage());
-    }
-  }
+//  public void publishMessageForConsumtion(String topicToPublish, String messageToPublish) {
+//    // Retrieve topic and message from the PluginCall
+//    System.out.print("Message to Publish : "+messageToPublish);
+//
+//    if (topicToPublish == null || topicToPublish.isEmpty()) {
+////            call.reject("Topic is required");
+//      return;
+//    }
+//
+//    if (messageToPublish == null) {
+////            call.reject("Message is required");
+//      return;
+//    }
+//
+//    try {
+//      // Convert JSObject to a proper JSON string
+//      // Check if the MQTT client is initialized and connected
+//      if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
+//        Log.e(TAG, "MQTT client is not connected.");
+////                call.reject("MQTT client is not connected.");
+//        return;
+//      }
+//
+//      // Create and configure MQTT message
+//      MqttMessage mqttMessage = new MqttMessage(messageToPublish.getBytes(StandardCharsets.UTF_8));
+//      mqttMessage.setQos(1); // QoS level (0, 1, or 2)
+//
+//      // Publish the message
+//      mqttAndroidClient.publish(topicToPublish, mqttMessage,getContext(),new IMqttActionListener(){
+//
+//        @Override
+//        public void onSuccess(IMqttToken asyncActionToken) {
+//          Log.d(TAG, "Message published to topic: " + topicToPublish + " with payload: " + messageToPublish);
+////          updateNotification("Message Published Successfully");
+//
+//          System.out.println("Message successfully published: " + messageToPublish);
+//
+//          // Send success response to the JS side
+//          JSObject result = new JSObject();
+//          result.put("status", "Message published successfully");
+//          result.put("topic", topicToPublish);
+////                    call.resolve(result);
+//        }
+//
+//        @Override
+//        public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+//          Log.d(TAG, "Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageToPublish);
+////          updateNotification("Failed to publish message");
+//
+//          System.out.println("Failed to publish to topic: " + TOPIC_to_Publish + " with payload: " + messageToPublish);
+//        }
+//      });
+//    } catch (Exception e) {
+//      Log.e(TAG, "Failed to publish MQTT message", e);
+////            call.reject("Failed to publish MQTT message: " + e.getMessage());
+//    }
+//  }
 
   @Override
   public void onDestroy() {
     super.onDestroy();
     Log.d(TAG, "Service destroyed");
     macAddress = null;
+    stopPeriodicRead();
     if (bluetoothStateReceiver != null) {
       unregisterReceiver(bluetoothStateReceiver);
     }

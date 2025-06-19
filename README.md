@@ -19,6 +19,11 @@ npx cap sync
 
 * [`StartBackgroundService(...)`](#startbackgroundservice)
 * [`requestNotificationPermission()`](#requestnotificationpermission)
+* [`connectBleDevice(...)`](#connectbledevice)
+* [`connectMqtt(...)`](#connectmqtt)
+* [`publishMessage(...)`](#publishmessage)
+* [`subscribeToTopic(...)`](#subscribetotopic)
+* [`subscribeToAuthTopic(...)`](#subscribetoauthtopic)
 * [`addListener('onMqttMessage', ...)`](#addlisteneronmqttmessage-)
 * [Interfaces](#interfaces)
 
@@ -30,14 +35,14 @@ npx cap sync
 ### StartBackgroundService(...)
 
 ```typescript
-StartBackgroundService(options: { baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string | null; macAddress: string | null; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; authTopicToSubscribe: string; authPayload: { parameters: { header: string; }; }; messageToPublishForAlerts: {}; messageToPublishForGasComsumtion: {}; }) => Promise<void>
+StartBackgroundService(options: { baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string | null; authPayload: { parameters: { header: string; }; }; }) => Promise<void>
 ```
 
 Start Background Service.
 
-| Param         | Type                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`options`** | <code>{ baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string \| null; macAddress: string \| null; BrokerUrl: string; username: string; password: string; topicTOSubscribe: string; topicTOpublish: string; authTopicToSubscribe: string; authPayload: { parameters: { header: string; }; }; messageToPublishForAlerts: {}; messageToPublishForGasComsumtion: {}; }</code> |
+| Param         | Type                                                                                                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`options`** | <code>{ baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string \| null; authPayload: { parameters: { header: string; }; }; }</code> |
 
 --------------------
 
@@ -51,6 +56,79 @@ requestNotificationPermission() => Promise<{ granted: boolean; }>
 Request notification permissions.
 
 **Returns:** <code>Promise&lt;{ granted: boolean; }&gt;</code>
+
+--------------------
+
+
+### connectBleDevice(...)
+
+```typescript
+connectBleDevice(options: { macAddress: string | null; }) => Promise<void>
+```
+
+| Param         | Type                                         |
+| ------------- | -------------------------------------------- |
+| **`options`** | <code>{ macAddress: string \| null; }</code> |
+
+--------------------
+
+
+### connectMqtt(...)
+
+```typescript
+connectMqtt(options: { BrokerUrl: string; iOSBrokerUrl: string; username: string; password: string; }) => Promise<{ isMqttConnected: boolean; }>
+```
+
+| Param         | Type                                                                                          |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| **`options`** | <code>{ BrokerUrl: string; iOSBrokerUrl: string; username: string; password: string; }</code> |
+
+**Returns:** <code>Promise&lt;{ isMqttConnected: boolean; }&gt;</code>
+
+--------------------
+
+
+### publishMessage(...)
+
+```typescript
+publishMessage(options: { topicToPublish: string; payload: string; }) => Promise<{ isMessagePublished: boolean; }>
+```
+
+| Param         | Type                                                      |
+| ------------- | --------------------------------------------------------- |
+| **`options`** | <code>{ topicToPublish: string; payload: string; }</code> |
+
+**Returns:** <code>Promise&lt;{ isMessagePublished: boolean; }&gt;</code>
+
+--------------------
+
+
+### subscribeToTopic(...)
+
+```typescript
+subscribeToTopic(options: { topicTOSubscribe: string; }) => Promise<{ isSubscriptionSuccess: boolean; }>
+```
+
+| Param         | Type                                       |
+| ------------- | ------------------------------------------ |
+| **`options`** | <code>{ topicTOSubscribe: string; }</code> |
+
+**Returns:** <code>Promise&lt;{ isSubscriptionSuccess: boolean; }&gt;</code>
+
+--------------------
+
+
+### subscribeToAuthTopic(...)
+
+```typescript
+subscribeToAuthTopic(options: { authTopicToSubscribe: string; }) => Promise<{ isSubscriptionSuccess: boolean; }>
+```
+
+| Param         | Type                                           |
+| ------------- | ---------------------------------------------- |
+| **`options`** | <code>{ authTopicToSubscribe: string; }</code> |
+
+**Returns:** <code>Promise&lt;{ isSubscriptionSuccess: boolean; }&gt;</code>
 
 --------------------
 
