@@ -10,7 +10,7 @@ export interface BackgroundServicePlugin {
     apiSuffix: string,
     deviceUUID: string,
     deviceType: string | null,
-    // macAddress: string | null,
+    macAddress: string | null,
     authPayload: {
       parameters: {
         header: string,
@@ -51,7 +51,7 @@ export interface BackgroundServicePlugin {
    * Listen for MQTT messages from native background service.
    */
   addListener(
-    eventName: 'onMqttMessage',
-    listenerFunc: (data: { message: string }) => void
+    eventName: string,
+    listenerFunc: (data: any) => void
   ): Promise<PluginListenerHandle>;
 }

@@ -24,7 +24,7 @@ npx cap sync
 * [`publishMessage(...)`](#publishmessage)
 * [`subscribeToTopic(...)`](#subscribetotopic)
 * [`subscribeToAuthTopic(...)`](#subscribetoauthtopic)
-* [`addListener('onMqttMessage', ...)`](#addlisteneronmqttmessage-)
+* [`addListener(string, ...)`](#addlistenerstring-)
 * [Interfaces](#interfaces)
 
 </docgen-index>
@@ -35,14 +35,14 @@ npx cap sync
 ### StartBackgroundService(...)
 
 ```typescript
-StartBackgroundService(options: { baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string | null; authPayload: { parameters: { header: string; }; }; }) => Promise<void>
+StartBackgroundService(options: { baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string | null; macAddress: string | null; authPayload: { parameters: { header: string; }; }; }) => Promise<void>
 ```
 
 Start Background Service.
 
-| Param         | Type                                                                                                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`options`** | <code>{ baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string \| null; authPayload: { parameters: { header: string; }; }; }</code> |
+| Param         | Type                                                                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`options`** | <code>{ baseURL: string; basicAUTH: string; apiSuffix: string; deviceUUID: string; deviceType: string \| null; macAddress: string \| null; authPayload: { parameters: { header: string; }; }; }</code> |
 
 --------------------
 
@@ -133,18 +133,18 @@ subscribeToAuthTopic(options: { authTopicToSubscribe: string; }) => Promise<{ is
 --------------------
 
 
-### addListener('onMqttMessage', ...)
+### addListener(string, ...)
 
 ```typescript
-addListener(eventName: 'onMqttMessage', listenerFunc: (data: { message: string; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: string, listenerFunc: (data: any) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for MQTT messages from native background service.
 
-| Param              | Type                                                 |
-| ------------------ | ---------------------------------------------------- |
-| **`eventName`**    | <code>'onMqttMessage'</code>                         |
-| **`listenerFunc`** | <code>(data: { message: string; }) =&gt; void</code> |
+| Param              | Type                                |
+| ------------------ | ----------------------------------- |
+| **`eventName`**    | <code>string</code>                 |
+| **`listenerFunc`** | <code>(data: any) =&gt; void</code> |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 

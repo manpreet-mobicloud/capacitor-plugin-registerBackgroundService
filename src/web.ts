@@ -3,13 +3,14 @@ import { WebPlugin } from '@capacitor/core';
 import type { BackgroundServicePlugin } from './definitions';
 
 export class BackgroundServiceWeb extends WebPlugin implements BackgroundServicePlugin {
+
   StartBackgroundService(_options: {
     baseURL: string,
     basicAUTH: string,
     apiSuffix: string,
     deviceUUID: string,
     deviceType: string | null,
-    // macAddress: string | null,
+    macAddress: string | null,
     authPayload: {
       parameters: {
         header: string,

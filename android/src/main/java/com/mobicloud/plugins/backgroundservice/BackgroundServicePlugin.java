@@ -19,6 +19,8 @@ import org.json.JSONObject;
 public class BackgroundServicePlugin extends Plugin {
 
     private BroadcastReceiver mqttReceiver;
+
+    private BroadcastReceiver logReceiver;
     private BackgroundService bobj;
 
     @PluginMethod
@@ -29,6 +31,7 @@ public class BackgroundServicePlugin extends Plugin {
         String deviceUUID = call.getString("deviceUUID");
         String deviceType = call.getString("deviceType");
         JSObject authPayload = call.getObject("authPayload");
+        String macAddress = call.getString("macAddress");
 
         JSObject apiPayload = new JSObject(authPayload.toString());
         String payload = apiPayload.toString();
@@ -43,13 +46,28 @@ public class BackgroundServicePlugin extends Plugin {
         serviceIntent.putExtra("deviceType", deviceType);
         serviceIntent.putExtra("apiPayload", payload);
 
-//        if ("BLE".equals(deviceType)) {
-//            serviceIntent.putExtra("macAddress", macAddress);
-//        }
+        if ("BLE".equals(deviceType)) {
+            serviceIntent.putExtra("macAddress", macAddress);
+        }
 
         getContext().startService(serviceIntent);
         this.bobj = new BackgroundService(getContext());
 
+        if (logReceiver == null) {
+          logReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+              String LOG = intent.getStringExtra("LOG");
+              String TAG = intent.getStringExtra("TAG");
+              JSObject data = new JSObject();
+
+              data.put("TAG", TAG);
+              data.put("LOG", LOG);
+              notifyListeners("onLogs", data);
+            }
+          };
+          LocalBroadcastManager.getInstance(getContext()).registerReceiver(logReceiver, new IntentFilter("com.mobicloud.logs"));
+        }
         call.resolve();
     }
 
@@ -62,19 +80,22 @@ public class BackgroundServicePlugin extends Plugin {
         return;
       }
 
-      if (bobj == null) {
-        call.reject("BackgroundService is not initialized. Ensure the service is started.");
+      BackgroundService service = BackgroundService.instance;
+
+      if (service == null) {
+        call.reject("BackgroundService is not running. Ensure the service is started.");
         return;
       }
 
       try {
-        bobj.connectToDevice(macAddress);
-      }
-      catch (Exception e) {
-        System.out.println("Error Occured while connecting to device");
-        call.reject(String.valueOf(e));
+        service.connectToDevice(macAddress);
+        call.resolve();
+      } catch (Exception e) {
+        Log.e("BackgroundService", "Error connecting to BLE device", e);
+        call.reject("BLE connection failed: " + e.getMessage());
       }
     }
+
     @PluginMethod
     public void connectMqtt(PluginCall call) {
         String brokerUrl = call.getString("BrokerUrl");
@@ -87,6 +108,23 @@ public class BackgroundServicePlugin extends Plugin {
         }
 
         JSObject res = new JSObject();
+
+        if (mqttReceiver == null) {
+          mqttReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+              String LOG = intent.getStringExtra("LOG");
+              String TAG = intent.getStringExtra("TAG");
+              JSObject data = new JSObject();
+
+              data.put("TAG", TAG);
+              data.put("LOG", LOG);
+              notifyListeners("onMqttMessage", data);
+            }
+          };
+          LocalBroadcastManager.getInstance(getContext()).registerReceiver(mqttReceiver, new IntentFilter("com.mobicloud.MQTT_MESSAGE"));
+        }
+
         bobj.connectToBroker(brokerUrl, username, password, new MqttConnectionCallback() {
 
             @Override
@@ -112,7 +150,10 @@ public class BackgroundServicePlugin extends Plugin {
             return;
         }
 
-        bobj.subscribeToTopic(topicToSubscribe, new MqttDownlinkCallBack() {
+      // Register BroadcastReceiver if not already
+
+
+      bobj.subscribeToTopic(topicToSubscribe, new MqttDownlinkCallBack() {
 
             @Override
             public void onSuccess() {
@@ -183,20 +224,6 @@ public class BackgroundServicePlugin extends Plugin {
                 call.reject(exception.toString());
             }
         });
-
-        // Register BroadcastReceiver if not already
-        if (mqttReceiver == null) {
-            mqttReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    String mqttMessage = intent.getStringExtra("message");
-                    JSObject data = new JSObject();
-                    data.put("message", mqttMessage);
-                    notifyListeners("onMqttMessage", data);
-                }
-            };
-            LocalBroadcastManager.getInstance(getContext()).registerReceiver(mqttReceiver, new IntentFilter("com.mobicloud.MQTT_MESSAGE"));
-        }
     }
 
     @Override
