@@ -23,6 +23,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.IBinder;
@@ -60,10 +61,13 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -80,6 +84,7 @@ public class BackgroundService extends Service {
   private static final String CHANNEL_ID = "BackgroundServiceChannel";
   private static final int NOTIFICATION_ID = 1;
 
+  private boolean authSentAfterReconnect = false;
   private BluetoothAdapter bluetoothAdapter;
   private BluetoothLeScanner bluetoothLeScanner;
   private BluetoothStateReceiver bluetoothStateReceiver;
@@ -97,6 +102,11 @@ public class BackgroundService extends Service {
   private boolean isDeviceConnected = false;
   private final AtomicBoolean isScanning = new AtomicBoolean(false);
   private final Handler scanHandler = new Handler();
+
+  public static Queue<String> normalDlQueue = new ConcurrentLinkedQueue<>();
+
+  private Runnable waitForAuthNotificationRunnable;
+  private boolean notificationReceived = false;
 
   // Define persistence
   MqttClientPersistence persistence = new MemoryPersistence();
@@ -118,9 +128,13 @@ public class BackgroundService extends Service {
 
   private Context context;
 
+  private static Context appContext;
   private static String authDlData = "";
   private final Handler handler = new Handler(Looper.getMainLooper());
   private Long lastAuthDlTime = null; // set this when MQTT DL arrives
+
+  private Runnable waitAfterUlRunnable;
+
 
   private MqttAndroidClient mqttAndroidClient;
 
@@ -129,6 +143,8 @@ public class BackgroundService extends Service {
   private BluetoothGattCharacteristic rxCharacteristics;
 
   private final long READ_INTERVAL = 5000;  // 5 seconds
+
+  private SharedPreferences sharedPref;
 
   public BackgroundService() {
     // Default empty constructor - Required by Android OS
@@ -142,16 +158,24 @@ public class BackgroundService extends Service {
   public void onCreate() {
     super.onCreate();
     Log.d(TAG, "Service created");
+
+    BackgroundService.appContext = getApplicationContext();
 //    sendLog("Service created");
     instance = this;
-
     createNotificationChannel();
     startForegroundServiceCompat();
+
+    sharedPref = getApplicationContext().getSharedPreferences("SmartRegulatorPrefs", Context.MODE_PRIVATE);
+  }
+
+  public static Context getAppContext() {
+    return appContext;
   }
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     Log.d(TAG, "Service started");
+    sharedPref = getApplicationContext().getSharedPreferences("SmartRegulatorPrefs", Context.MODE_PRIVATE);
 
 //    sendLog("Service started");
     setupBluetoothMonitoring();
@@ -215,6 +239,7 @@ public class BackgroundService extends Service {
         }
       } else {
 //        System.out.println("TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
+//        Log.d(TAG,"TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
 
 //        sendLog("TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
       }
@@ -270,12 +295,19 @@ public class BackgroundService extends Service {
             JSONObject resultObject = resultsArray.getJSONObject(0).getJSONObject("result");
 
             // Extract values
+            String packetType = resultObject.getString("packetType");
             String regulatorId = resultObject.getString("Regulatorid ");
             String data = resultObject.getString("Data");
             String sha = resultObject.getString("SHA");
 
             // Build the string same as JavaScript
             authDlData = String.format("{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",regulatorId, data, sha);
+
+            if(packetType.equals("AuthDL")) {
+              SharedPreferences.Editor editor = sharedPref.edit();
+              editor.putString("authDlData", authDlData);
+              editor.apply(); // or editor.commit();
+            }
 
             // Log or use the string
             Log.d(TAG,"Auth DL Data is: "+authDlData);
@@ -571,74 +603,84 @@ public class BackgroundService extends Service {
       }
     }
 
-
-//    @Override
-//    public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-//      if (status == BluetoothGatt.GATT_SUCCESS) {
-//        UUID uuid = characteristic.getUuid();
-//        byte[] data = characteristic.getValue();
-//        Log.d(TAG, "Data read from " + uuid + ": " + new String(data));
-//      } else {
-//        Log.e(TAG, "Read failed with status: " + status);
-//      }
-//    }
-
     @Override
     public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-      UUID uuid = characteristic.getUuid();
       byte[] value = characteristic.getValue();
+      if (value == null) return;
 
-      if (value != null) {
-        Log.d(TAG, "Notification received from " + uuid + ": " + new String(value));
-//        sendLog("Notification received from " + uuid + ": " + new String(value));
+      String jsonString = new String(value, StandardCharsets.UTF_8);
+      Log.d(TAG, "Notification received: " + jsonString);
+      publishMessage(Constants.PUBLISH_TO_TOPIC, jsonString, null);
 
-        try {
-          String jsonString = new String(value, StandardCharsets.UTF_8);
-          Log.d(TAG, "Received Notification JSON: " + jsonString);
-          System.out.println("Received Notification JSON: " + jsonString);
-//          sendLog("Received Notification JSON: " + jsonString);
-          Object mqttUplinkCallBack = null;
-          publishMessage(Constants.PUBLISH_TO_TOPIC,jsonString, (MqttUplinkCallBack) mqttUplinkCallBack);
+      notificationReceived = true;
 
-        } catch (Exception e) {
-          Log.e("BLE", "Failed to parse JSON: " + e.getMessage());
-        }
+      // Cancel 1.5s Auth wait if active
+      if (waitForAuthNotificationRunnable != null) {
+        handler.removeCallbacks(waitForAuthNotificationRunnable);
       }
+
+      // Start 1s wait for next notification
+      start1sWaitForNextUlOrDl();
+    }
+
+    private void start1sWaitForNextUlOrDl() {
+      if (waitAfterUlRunnable != null) handler.removeCallbacks(waitAfterUlRunnable);
+
+      waitAfterUlRunnable = () -> {
+        Log.d(TAG, "1s passed after UL, sending next normal DL.");
+        sendNextNormalDl();
+      };
+
+      handler.postDelayed(waitAfterUlRunnable, 1000);
     }
 
     @Override
     public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
       if (status == BluetoothGatt.GATT_SUCCESS) {
-        System.out.println("Auth DL Successfully written to device");
+//        System.out.println("Auth DL Successfully written to device");
+
+        authSentAfterReconnect = true;
+
 //        sendLog("Auth DL Successfully written to device");
 
       } else {
         System.out.println("Failed to write data to device");
 //        sendLog("Failed to write data to device");
-//        Log.e(TAG, "Chunk write failed at index " + currentChunkIndex);
+        Log.e(TAG, "Failed to write data to device");
       }
     }
   };
 
-  private void writeDataToDevice(BluetoothGattCharacteristic characteristic, String authDlData) {
+  private boolean writeDataToDevice(BluetoothGattCharacteristic characteristic, String authDlData) {
+    Log.d(TAG,"Inside write to Device Function...!!");
+    Context context = BackgroundService.getAppContext();
+    if (context == null) {
+      Log.e(TAG, "Context is null");
+      return false;
+    }
 
     BluetoothGatt bluetoothGatt = BleClientHolder.getGatt();
 
     if (bluetoothGatt == null) {
       Log.e(TAG, "BluetoothGatt not initialized");
-      return;
+      return false;
+    } else {
+      Log.d(TAG,"BlutoothGatt is not null"+bluetoothGatt);
     }
 
     if (characteristic == null) {
       Log.e(TAG, "Characteristic is null — cannot write.");
-      return;
+      return false;
+    } else {
+      Log.d(TAG,"Characteristic is not null"+characteristic);
     }
 
     byte[] payload = authDlData.getBytes(StandardCharsets.UTF_8);
-//    Log.d(TAG, "Payload to write to device is: " + Arrays.toString(payload));
+    Log.d(TAG, "Payload to write to device is: " + Arrays.toString(payload));
 
     characteristic.setValue(payload);
     characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+
 
     if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
       // TODO: Consider calling
@@ -648,16 +690,23 @@ public class BackgroundService extends Service {
       //                                          int[] grantResults)
       // to handle the case where the user grants the permission. See the documentation
       // for ActivityCompat#requestPermissions for more details.
-      return;
+      return false;
     }
-    boolean success = bluetoothGatt.writeCharacteristic(characteristic);
-    Log.d(TAG, "Write triggered: " + (success ? "success" : "failed"));
+
+    try {
+      boolean success = bluetoothGatt.writeCharacteristic(characteristic);
+      Log.d(TAG, "Write triggered: " + (success ? "success" : "failed"));
+
+      return success;
+    } catch (IllegalArgumentException e) {
+      Log.e(TAG,"Exception occured while writing data to device"+e);
+      return  false;
+    }
   }
 
   private void enableNotification(BluetoothGattCharacteristic characteristic) {
     if (bluetoothGatt == null) {
       Log.e(TAG, "BluetoothGatt not initialized");
-//      sendLog("BluetoothGatt not initialized");
       return;
     }
 
@@ -667,44 +716,104 @@ public class BackgroundService extends Service {
     }
 
     bluetoothGatt.setCharacteristicNotification(characteristic, true);
-
     BluetoothGattDescriptor descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+
     if (descriptor != null) {
       descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
       bluetoothGatt.writeDescriptor(descriptor);
       Log.d(TAG, "Notification enabled for characteristic: " + characteristic.getUuid());
-      System.out.println("Notification enable for characteristic: "+characteristic.getUuid());
-//      sendLog("Notification enabled for characteristic: " + characteristic.getUuid());
-
     } else {
       Log.e(TAG, "Descriptor not found for characteristic: " + characteristic.getUuid());
-//      sendLog("Descriptor not found for characteristic: " + characteristic.getUuid());
     }
-  }
 
-  private void startPeriodicRead() {
-    handler.postDelayed(readRunnable, READ_INTERVAL);
-    Log.d(TAG, "Started periodic read every " + READ_INTERVAL / 1000 + " seconds.");
-  }
+    // Step 2: Send stored Auth DL
+    String authDlData = sharedPref.getString("authDlData", "default_name");
 
-  private void stopPeriodicRead() {
-    handler.removeCallbacks(readRunnable);
-    Log.d(TAG, "Stopped periodic read.");
-  }
+    handler.postDelayed(() -> {
+      if (!"default_name".equals(authDlData)) {
+        Log.d(TAG, "Shared AUTH DL Data is: " + authDlData);
+        Boolean bret = writeDataToDevice(rxCharacteristics, authDlData);
 
-  private final Runnable readRunnable = new Runnable() {
-    @Override
-    public void run() {
-      if (txCharacteristic != null && bluetoothGatt != null) {
-        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-          boolean readInitiated = bluetoothGatt.readCharacteristic(txCharacteristic);
-          Log.d(TAG, "Periodic read initiated: " + readInitiated);
+        if(bret == true)
+        {
+          Log.d(TAG,"Auth DL Successfully Written to device after reconnection");
         }
-      }
-      handler.postDelayed(this, READ_INTERVAL);
-    }
-  };
+        else
+        {
+          Log.d(TAG,"Unable to write Auth DL to device after reconnection");
 
+          return;
+        }
+
+        // Step 3: Start 1.5s wait for notification
+        notificationReceived = false;
+
+        if (waitForAuthNotificationRunnable != null) {
+          handler.removeCallbacks(waitForAuthNotificationRunnable);
+        }
+
+        waitForAuthNotificationRunnable = () -> {
+          if (!notificationReceived) {
+            Log.d(TAG, "No notification after Auth DL. Sending next normal DL.");
+            sendNextNormalDl(); // ✅ Trigger your DL queue fallback
+          }
+        };
+
+        handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+      }
+    }, 500); // 300ms delay to let BLE stack stabilize
+  }
+
+  private void sendNextNormalDl() {
+    if (!authSentAfterReconnect) {
+      Log.d(TAG, "Auth DL not yet sent. Skipping normal DL.");
+      return;
+    }
+
+    if (normalDlQueue.isEmpty()) {
+      Log.d(TAG, "Normal DL queue is empty.");
+      return;
+    }
+
+    BluetoothGatt gatt = BleClientHolder.getGatt();
+    BluetoothGattCharacteristic characteristic = BleClientHolder.getRxCharacteristic();
+
+    String nextDl = normalDlQueue.poll(); // take the item off the queue
+
+    if (gatt == null || characteristic == null) {
+      Log.w(TAG, "BLE not ready. Re-queuing normal DL.");
+      normalDlQueue.add(nextDl); // 🔁 put it back
+      return;
+    }
+
+    Log.d(TAG, "Sending Normal DL: " + nextDl);
+    boolean bret = writeDataToDevice(characteristic, nextDl); // fire write
+
+    if(bret == true) {
+      Log.d(TAG,"Normal DL Successfully written to device");
+    } else {
+      Log.d(TAG,"Failed to write normal DL to device");
+      normalDlQueue.add(nextDl);
+      return;
+    }
+    notificationReceived = false;
+
+    if (waitForAuthNotificationRunnable != null) {
+      handler.removeCallbacks(waitForAuthNotificationRunnable);
+    }
+
+    waitForAuthNotificationRunnable = () -> {
+      if (!notificationReceived) {
+        Log.d(TAG, "No notification after 1.5s. Sending next normal DL.");
+        sendNextNormalDl(); // try next one
+      } else {
+        Log.d(TAG, "Notification received. Waiting 1s to send next DL.");
+        handler.postDelayed(this::sendNextNormalDl, 1000);
+      }
+    };
+
+    handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+  }
   private void startScanningForDevice() {
     if (bluetoothAdapter == null) {
       System.out.println("BluetoothAdapter is null — attempting fallback init");
@@ -1010,6 +1119,7 @@ public class BackgroundService extends Service {
           JSONObject json = new JSONObject(msg);
 
           // Extract required fields
+          String packetType = json.getString("packetType");
           String regulatorId = json.getString("Regulatorid ");
           String data = json.getString("Data");
           String sha = json.getString("SHA");
@@ -1020,18 +1130,45 @@ public class BackgroundService extends Service {
             regulatorId, data, sha
           );
 
+
 //          Log.d(TAG, "Formatted payload: " + formatted);
 
           BluetoothGatt gatt = BleClientHolder.getGatt();
           BluetoothGattCharacteristic characteristic = BleClientHolder.getRxCharacteristic();
 
-          if (gatt == null || characteristic == null) {
-            Log.w(TAG, "BLE not ready. Storing message for retry.");
-            pendingBlePayload = formatted;
-            return;
-          }
+          if (packetType.equalsIgnoreCase("AuthDL")) {
+            Log.d(TAG, "Received Auth DL");
 
-          writeDataToDevice(characteristic, formatted);
+            // Save in SharedPreferences
+//            sharedPref.edit().putString("authDlData", formatted).apply();
+
+            if (gatt == null || characteristic == null) {
+              Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
+              return;
+            }
+
+            boolean bret = writeDataToDevice(characteristic, formatted);
+            if(bret == true)
+            {
+              authSentAfterReconnect = true;
+            }
+            else
+            {
+              authSentAfterReconnect = false;
+            }
+          } else {
+            Log.d(TAG, "Received Normal DL. Adding to queue.");
+
+            // ✅ Store in normal DL queue
+            normalDlQueue.add(formatted);
+
+            Log.d(TAG,"Normal DL Queue is: "+normalDlQueue);
+            // Send if ready
+            if (gatt != null && characteristic != null && authSentAfterReconnect) {
+              sendNextNormalDl();
+            }
+
+          }
         } catch (Exception e) {
           Log.e(TAG, "Exception occurred while processing MQTT message", e);
         }
