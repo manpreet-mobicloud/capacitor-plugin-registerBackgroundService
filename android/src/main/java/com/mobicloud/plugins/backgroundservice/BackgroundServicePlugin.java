@@ -21,6 +21,8 @@ public class BackgroundServicePlugin extends Plugin {
     private BroadcastReceiver mqttReceiver;
 
     private BroadcastReceiver logReceiver;
+
+    private BroadcastReceiver notificationReceiver;
     private BackgroundService bobj;
 
     @PluginMethod
@@ -53,21 +55,35 @@ public class BackgroundServicePlugin extends Plugin {
         getContext().startService(serviceIntent);
         this.bobj = new BackgroundService(getContext());
 
-        if (logReceiver == null) {
-          logReceiver = new BroadcastReceiver() {
+        if (notificationReceiver == null) {
+          notificationReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-              String LOG = intent.getStringExtra("LOG");
-              String TAG = intent.getStringExtra("TAG");
-              JSObject data = new JSObject();
+              String notification = intent.getStringExtra("notification");
 
-              data.put("TAG", TAG);
-              data.put("LOG", LOG);
-              notifyListeners("onLogs", data);
+              JSObject notificationData = new JSObject();
+              notificationData.put("notification", notification);
+              notifyListeners("onNotification", notificationData);
             }
           };
-          LocalBroadcastManager.getInstance(getContext()).registerReceiver(logReceiver, new IntentFilter("com.mobicloud.logs"));
+          LocalBroadcastManager.getInstance(getContext()).registerReceiver(notificationReceiver, new IntentFilter("com.mobicloud.notifcationLogs"));
         }
+
+      if (logReceiver == null) {
+        logReceiver = new BroadcastReceiver() {
+          @Override
+          public void onReceive(Context context, Intent intent) {
+            String LOG = intent.getStringExtra("LOG");
+            String TAG = intent.getStringExtra("TAG");
+            JSObject logData = new JSObject();
+
+            logData.put("LOG", LOG);
+            logData.put("TAG",TAG);
+            notifyListeners("onLogs", logData);
+          }
+        };
+        LocalBroadcastManager.getInstance(getContext()).registerReceiver(notificationReceiver, new IntentFilter("com.mobicloud.logs"));
+      }
         call.resolve();
     }
 
@@ -113,12 +129,11 @@ public class BackgroundServicePlugin extends Plugin {
           mqttReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-              String LOG = intent.getStringExtra("LOG");
-              String TAG = intent.getStringExtra("TAG");
+              String mqttPublishStatus = intent.getStringExtra("mqttPublishStatus");
+
               JSObject data = new JSObject();
 
-              data.put("TAG", TAG);
-              data.put("LOG", LOG);
+              data.put("mqttPublishStatus", mqttPublishStatus);
               notifyListeners("onMqttMessage", data);
             }
           };

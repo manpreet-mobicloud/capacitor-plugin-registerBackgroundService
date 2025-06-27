@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -83,6 +84,12 @@ public class MainActivity extends BridgeActivity {
     } else {
       startService(serviceIntent);  // For versions below Android 8.0
     }
+  }
+
+  @Override
+  public boolean stopService(Intent name) {
+    Log.d("Backgroudn Service","Background Service is stopped");
+    return super.stopService(name);
   }
 
   // Handle back button press

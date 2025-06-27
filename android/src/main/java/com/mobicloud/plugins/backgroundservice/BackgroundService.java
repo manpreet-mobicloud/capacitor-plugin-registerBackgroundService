@@ -60,9 +60,12 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
@@ -95,11 +98,18 @@ public class BackgroundService extends Service {
 
   private String MQTT_URL = "";
 
+  private boolean isBLEMonitoringInitialized = false;
+
+  private boolean isConnecting = false;
+
   private String MQTT_USERNAME = "";
 
   private String MQTT_Password = "";
 
   private boolean isDeviceConnected = false;
+
+  private boolean isAuthDlWrittenToDevice = false;
+
   private final AtomicBoolean isScanning = new AtomicBoolean(false);
   private final Handler scanHandler = new Handler();
 
@@ -160,7 +170,7 @@ public class BackgroundService extends Service {
     Log.d(TAG, "Service created");
 
     BackgroundService.appContext = getApplicationContext();
-//    sendLog("Service created");
+//    sendNotification("Service created");
     instance = this;
     createNotificationChannel();
     startForegroundServiceCompat();
@@ -177,7 +187,7 @@ public class BackgroundService extends Service {
     Log.d(TAG, "Service started");
     sharedPref = getApplicationContext().getSharedPreferences("SmartRegulatorPrefs", Context.MODE_PRIVATE);
 
-//    sendLog("Service started");
+//    sendNotification("Service started");
     setupBluetoothMonitoring();
 
     if(intent != null)
@@ -208,13 +218,28 @@ public class BackgroundService extends Service {
     return null;
   }
 
-  private void sendLog(String message) {
+  private void sendNotification(String message) {
 //    Log.d(TAG, message);
 //    System.out.println(message);
 
+    Intent intent = new Intent("com.mobicloud.notifcationLogs");
+    intent.putExtra("notification", message);
+
+    LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+  }
+
+  private void sendLog(String message) {
     Intent intent = new Intent("com.mobicloud.logs");
-    intent.putExtra("LOG", message);
+    intent.putExtra("LOG",message);
     intent.putExtra("TAG", TAG);
+
+    LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+  }
+
+  private void sendMqttPublishStatus(String message) {
+    Intent intent = new Intent("com.mobicloud.MQTT_MESSAGE");
+    intent.putExtra("mqttPublishStatus", message);
+
     LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
   }
 
@@ -226,7 +251,7 @@ public class BackgroundService extends Service {
 
       if (ttlRemaining == 0) {
         if ((BASE_URL != null) && (BASIC_AUTH != null) && (API_SUFFIX != null)
-                && (API_PAYLOAD != null) && (DEVICE_UUID != null)) {
+          && (API_PAYLOAD != null) && (DEVICE_UUID != null)) {
 
           String finalUrl = BASE_URL + DEVICE_UUID + API_SUFFIX;
           String finalAuthHeader = "Basic " + BASIC_AUTH;
@@ -241,7 +266,7 @@ public class BackgroundService extends Service {
 //        System.out.println("TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
 //        Log.d(TAG,"TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
 
-//        sendLog("TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
+//        sendNotification("TTL valid, Auth DL not required. Time left: " + ttlRemaining + "s");
       }
 
       handler.postDelayed(authDlCheckRunnable, 1000); // check again after 1 sec
@@ -257,72 +282,72 @@ public class BackgroundService extends Service {
     }
 
     new Thread(() -> {
-        try {
-            URL url = new URL(urlString);
-            HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Authorization",authHeader);
-            conn.setDoOutput(true);
+      try {
+        URL url = new URL(urlString);
+        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Authorization",authHeader);
+        conn.setDoOutput(true);
 
-            try (OutputStream os = conn.getOutputStream()) {
-                byte[] input = jsonPayload.getBytes("utf-8");
-                os.write(input, 0, input.length);
-            }
+        try (OutputStream os = conn.getOutputStream()) {
+          byte[] input = jsonPayload.getBytes("utf-8");
+          os.write(input, 0, input.length);
+        }
 
-            int responseCode = conn.getResponseCode();
+        int responseCode = conn.getResponseCode();
 
-            if(responseCode == 200) {
-              lastAuthDlTime = System.currentTimeMillis() / 1000;
-            }
+        if(responseCode == 200) {
+          lastAuthDlTime = System.currentTimeMillis() / 1000;
+        }
 //            Log.d("BackgroundService", "HTTP Response Code: " + responseCode);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    responseCode >= 200 && responseCode < 300 ? conn.getInputStream() : conn.getErrorStream()));
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
-            }
-            reader.close();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(
+          responseCode >= 200 && responseCode < 300 ? conn.getInputStream() : conn.getErrorStream()));
+        StringBuilder response = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+          response.append(line);
+        }
+        reader.close();
 
-            System.out.println("HTTP Response is: "+response);
+        System.out.println("HTTP Response is: "+response);
 
-            // Parse the response JSON
-            JSONObject jsonResponse = new JSONObject(response.toString());
+        // Parse the response JSON
+        JSONObject jsonResponse = new JSONObject(response.toString());
 
-            // Navigate into the nested structure
-            JSONArray resultsArray = jsonResponse.getJSONArray("results");
-            JSONObject resultObject = resultsArray.getJSONObject(0).getJSONObject("result");
+        // Navigate into the nested structure
+        JSONArray resultsArray = jsonResponse.getJSONArray("results");
+        JSONObject resultObject = resultsArray.getJSONObject(0).getJSONObject("result");
 
-            // Extract values
-            String packetType = resultObject.getString("packetType");
-            String regulatorId = resultObject.getString("Regulatorid ");
-            String data = resultObject.getString("Data");
-            String sha = resultObject.getString("SHA");
+        // Extract values
+        String packetType = resultObject.getString("packetType");
+        String regulatorId = resultObject.getString("Regulatorid ");
+        String data = resultObject.getString("Data");
+        String sha = resultObject.getString("SHA");
 
-            // Build the string same as JavaScript
-            authDlData = String.format("{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",regulatorId, data, sha);
+        // Build the string same as JavaScript
+        authDlData = String.format("{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",regulatorId, data, sha);
 
-            if(packetType.equals("AuthDL")) {
-              SharedPreferences.Editor editor = sharedPref.edit();
-              editor.putString("authDlData", authDlData);
-              editor.apply(); // or editor.commit();
-            }
+        if(packetType.equals("AuthDL")) {
+          SharedPreferences.Editor editor = sharedPref.edit();
+          editor.putString("authDlData", authDlData);
+          editor.apply(); // or editor.commit();
+        }
 
-            // Log or use the string
-            Log.d(TAG,"Auth DL Data is: "+authDlData);
-            System.out.println("authDLdata: " + authDlData);
-//            sendLog("Auth DL Data to write to device is: "+authDlData);
-            byte[] payload = authDlData.getBytes(StandardCharsets.UTF_8);
+        // Log or use the string
+        Log.d(TAG,"Auth DL Data is: "+authDlData);
+        System.out.println("authDLdata: " + authDlData);
+//            sendNotification("Auth DL Data to write to device is: "+authDlData);
+        byte[] payload = authDlData.getBytes(StandardCharsets.UTF_8);
 
 //            Log.d(TAG,"Payload to write to device is: "+authDlData);
 //            writeDataToDevice(rxCharacteristics,authDlData);
 
-        } catch (Exception e) {
-            Log.e("BackgroundService", "HTTP request failed", e);
-            System.out.println("Error Occured While Performing HTTP Request: "+e);
-//            sendLog("Error Occured While Performing HTTP Request: "+e);
-        }
+      } catch (Exception e) {
+        Log.e("BackgroundService", "HTTP request failed", e);
+        System.out.println("Error Occured While Performing HTTP Request: "+e);
+//            sendNotification("Error Occured While Performing HTTP Request: "+e);
+      }
     }).start();
   }
 
@@ -355,9 +380,16 @@ public class BackgroundService extends Service {
   }
 
   private void  setupBluetoothMonitoring() {
+
+    if(isBLEMonitoringInitialized == true) {
+      Log.d(TAG,"BLE Montoring is already intialized");
+      connectToDevice(macAddress);
+      return;
+    }
+
     BluetoothManager bluetoothManager = (BluetoothManager) getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
 
-//    sendLog("Inside setupBluetoothMonitoring");
+//    sendNotification("Inside setupBluetoothMonitoring");
 
     bluetoothStateReceiver = new BluetoothStateReceiver();
     IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
@@ -367,7 +399,7 @@ public class BackgroundService extends Service {
       Log.e(TAG, "BluetoothManager is null");
       System.out.println("BluetoothManager is null");
 
-//      sendLog("BluetoothManager is null");
+//      sendNotification("BluetoothManager is null");
       return;
     }
 
@@ -377,7 +409,7 @@ public class BackgroundService extends Service {
       Log.e(TAG, "BluetoothAdapter is null");
       System.out.println("BluetoothAdapter is null");
 
-//      sendLog("BluetoothAdapter is null");
+//      sendNotification("BluetoothAdapter is null");
 
       return;
     }
@@ -386,7 +418,7 @@ public class BackgroundService extends Service {
       Log.e(TAG, "Bluetooth is off");
       System.out.println("BluetoothManage is OFF");
 
-//      sendLog("Bluetooth is off");
+//      sendNotification("Bluetooth is off");
 
       return;
     }
@@ -396,14 +428,15 @@ public class BackgroundService extends Service {
       Log.e(TAG, "BluetoothLeScanner is null");
       System.out.println("BluetoothLE Scanner is null");
 
-//      sendLog("BluetoothLE Scanner is null");
+//      sendNotification("BluetoothLE Scanner is null");
 
     }
 
     Log.d(TAG, "Bluetooth monitoring initialized.");
     System.out.println("Bluetooth monitoring initialized");
 
-//    sendLog("Bluetooth monitoring initialized");
+    isBLEMonitoringInitialized = true;
+//    sendNotification("Bluetooth monitoring initialized");
 //    scanHandler.postDelayed(scanRunnable, 5000);
 
   }
@@ -441,7 +474,8 @@ public class BackgroundService extends Service {
 
   public void connectToDevice(String address) {
     System.out.println("Mac Address is: " + address);
-//    sendLog("Received MAC: " + address);
+
+//    sendNotification("Received MAC: " + address);
 
     try {
       macAddress = address;
@@ -456,20 +490,20 @@ public class BackgroundService extends Service {
 
       if (bluetoothAdapter == null) {
         Log.e(TAG, "Failed to get BluetoothAdapter.");
-//        sendLog("BluetoothAdapter is still null.");
+//        sendNotification("BluetoothAdapter is still null.");
         return;
       }
 
       if (macAddress == null || macAddress.isEmpty()) {
         Log.e(TAG, "Invalid MAC address.");
-//        sendLog("Invalid MAC address.");
+//        sendNotification("Invalid MAC address.");
         return;
       }
 
       // Check BLUETOOTH_CONNECT permission
       if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
         Log.e(TAG, "BLUETOOTH_CONNECT permission missing.");
-//        sendLog("BLUETOOTH_CONNECT permission missing.");
+//        sendNotification("BLUETOOTH_CONNECT permission missing.");
         return;
       }
 
@@ -486,22 +520,22 @@ public class BackgroundService extends Service {
       BluetoothDevice deviceToConnect;
       if (bondedDevice != null) {
         Log.d(TAG, "Bonded device found. Reusing it.");
-//        sendLog("Bonded device found. Reusing it.");
+//        sendNotification("Bonded device found. Reusing it.");
         deviceToConnect = bondedDevice;
       } else {
         Log.w(TAG, "Device not bonded. Using getRemoteDevice.");
-//        sendLog("Device not bonded. Using getRemoteDevice.");
+//        sendNotification("Device not bonded. Using getRemoteDevice.");
         deviceToConnect = bluetoothAdapter.getRemoteDevice(macAddress);
       }
 
       int bondState = deviceToConnect.getBondState();
       Log.d(TAG, "Bond state: " + bondState);
-//      sendLog("Bond state: " + bondState);
+//      sendNotification("Bond state: " + bondState);
 
       // Optional: Only try to create bond if not already bonded
       if (bondState != BluetoothDevice.BOND_BONDED) {
         Log.i(TAG, "Device not bonded. Trying to create bond.");
-//        sendLog("Device not bonded. Trying to create bond.");
+//        sendNotification("Device not bonded. Trying to create bond.");
         deviceToConnect.createBond(); // triggers pairing UI
         // Don't proceed with GATT connection until bonded
         return;
@@ -510,16 +544,17 @@ public class BackgroundService extends Service {
       bluetoothGatt = deviceToConnect.connectGatt(this, true, gattCallback);
 
       Log.d(TAG, "Attempting to connect to BLE device: " + macAddress);
-//      sendLog("Attempting to connect to BLE device: " + macAddress);
+      isConnecting = true;
+//      sendNotification("Attempting to connect to BLE device: " + macAddress);
 
     } catch (IllegalArgumentException e) {
       Log.e(TAG, "Invalid MAC format: " + e.getMessage());
-//      sendLog("Invalid MAC format: " + e.getMessage());
+//      sendNotification("Invalid MAC format: " + e.getMessage());
 
     } catch (Exception e) {
       Log.e(TAG, "Exception during BLE connect: " + e);
-//      sendLog("Exception during BLE connect: " + e);
-
+//      sendNotification("Exception during BLE connect: " + e);
+      isConnecting = false;
 //      scanHandler.postDelayed(scanRunnable, 5000);
       startScanningForDevice();
     }
@@ -532,8 +567,8 @@ public class BackgroundService extends Service {
       if (newState == BluetoothGatt.STATE_CONNECTED) {
         Log.d(TAG, "Connected to BLE device.");
         System.out.println("Connected to BLE device");
-
-//        sendLog("Connected to BLE device");
+        sendLog("Connected to BLE device");
+//        sendNotification("Connected to BLE device");
 
         isDeviceConnected = true;
 
@@ -548,11 +583,11 @@ public class BackgroundService extends Service {
 
       } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
         Log.d(TAG, "Disconnected from BLE device.");
-
-//        sendLog("Disconnected from BLE device.");
+        sendLog("Disconnected from BLE device.");
+//        sendNotification("Disconnected from BLE device.");
 
         txCharacteristic = null;
-
+        isAuthDlWrittenToDevice = false;
         isDeviceConnected = false;
 
         // 🔁 Restart scan loop if disconnected
@@ -579,7 +614,7 @@ public class BackgroundService extends Service {
             enableNotification(txCharacteristic);
           } else {
             Log.e(TAG, "TX Characteristic not found.");
-//            sendLog("TX Characteristic not found.");
+//            sendNotification("TX Characteristic not found.");
           }
 
           // ✅ Mark BLE as ready
@@ -594,12 +629,12 @@ public class BackgroundService extends Service {
 
         } else {
           Log.e(TAG, "Nordic UART service not found.");
-//          sendLog("Nordic UART service not found.");
+//          sendNotification("Nordic UART service not found.");
         }
 
       } else {
         Log.e(TAG, "Service discovery failed with status: " + status);
-//        sendLog("Service discovery failed with status: " + status);
+//        sendNotification("Service discovery failed with status: " + status);
       }
     }
 
@@ -610,7 +645,24 @@ public class BackgroundService extends Service {
 
       String jsonString = new String(value, StandardCharsets.UTF_8);
       Log.d(TAG, "Notification received: " + jsonString);
-      publishMessage(Constants.PUBLISH_TO_TOPIC, jsonString, null);
+      sendNotification("Notification received from device: " + jsonString);
+
+      try {
+        // Parse the original JSON string (if it's already in JSON format)
+        JSONObject json = new JSONObject(jsonString);
+
+        // Add current timestamp
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+        json.put("timestamp", timestamp);
+
+        // Optionally log the updated payload
+        Log.d(TAG, "MQTT Payload: " + json.toString());
+
+        // Publish updated message
+        publishMessage(Constants.PUBLISH_TO_TOPIC, json.toString(), null);
+      } catch (Exception e) {
+        Log.e(TAG, "Failed to add timestamp or publish MQTT message", e);
+      }
 
       notificationReceived = true;
 
@@ -641,11 +693,11 @@ public class BackgroundService extends Service {
 
         authSentAfterReconnect = true;
 
-//        sendLog("Auth DL Successfully written to device");
+//        sendNotification("Auth DL Successfully written to device");
 
       } else {
         System.out.println("Failed to write data to device");
-//        sendLog("Failed to write data to device");
+//        sendNotification("Failed to write data to device");
         Log.e(TAG, "Failed to write data to device");
       }
     }
@@ -737,11 +789,17 @@ public class BackgroundService extends Service {
         if(bret == true)
         {
           Log.d(TAG,"Auth DL Successfully Written to device after reconnection");
+
+          isAuthDlWrittenToDevice = true;
+
+          authSentAfterReconnect = true;
         }
         else
         {
           Log.d(TAG,"Unable to write Auth DL to device after reconnection");
+          isAuthDlWrittenToDevice = false;
 
+          authSentAfterReconnect = false;
           return;
         }
 
@@ -815,6 +873,7 @@ public class BackgroundService extends Service {
     handler.postDelayed(waitForAuthNotificationRunnable, 1500);
   }
   private void startScanningForDevice() {
+
     if (bluetoothAdapter == null) {
       System.out.println("BluetoothAdapter is null — attempting fallback init");
       Log.w(TAG, "BluetoothAdapter is null — attempting fallback init");
@@ -824,6 +883,7 @@ public class BackgroundService extends Service {
         bluetoothAdapter = bluetoothManager.getAdapter();
       }
     }
+
     if (isScanning.get() || isDeviceConnected) {
       return;
     }
@@ -856,7 +916,7 @@ public class BackgroundService extends Service {
 
     bluetoothLeScanner.startScan(scanCallback);
     Log.d(TAG, "Started scanning for devices.");
-
+    sendLog("Started scanning for devices.");
     // Stop scan after 15 seconds and restart after 5 seconds
     scanHandler.postDelayed(() -> {
       stopScanning();
@@ -865,84 +925,6 @@ public class BackgroundService extends Service {
       scanHandler.postDelayed(this::startScanningForDevice, 5000);
 
     }, 15000); // Scan for 15 seconds
-  }
-
-//  private final Runnable scanRunnable = new Runnable() {
-//    @Override
-//    public void run() {
-//
-//      if (bluetoothAdapter == null || bluetoothLeScanner == null || !bluetoothAdapter.isEnabled()) {
-//        Log.w(TAG, "Bluetooth not ready. Retrying scan loop...");
-//
-//        sendLog("Bluetooth not ready. Retrying scan loop...");
-//        scanHandler.postDelayed(this, 10000); // Retry scan loop in 10 seconds
-//        return;
-//      }
-//
-//      if (!isConnectedToDevice()) {
-//        Log.d(TAG, "Device not connected. Starting scan...");
-//        sendLog("Device not connected. Starting scan...");
-//
-//        if (ActivityCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.BLUETOOTH_SCAN)
-//          != PackageManager.PERMISSION_GRANTED) {
-//          Log.e(TAG, "BLUETOOTH_SCAN permission not granted.");
-//          scanHandler.postDelayed(this, 20000); // Retry loop after 20 seconds
-//          return;
-//        }
-//
-//        bluetoothLeScanner.startScan(scanCallback);
-//
-//        // Stop scan after 15 seconds
-//        scanHandler.postDelayed(() -> {
-//          bluetoothLeScanner.stopScan(scanCallback);
-//          Log.d(TAG, "Scan stopped.");
-//
-//          sendLog("Scan stopped.");
-////          intent.putExtra("LOG", "Scan stopped....");
-////          intent.putExtra("TAG", TAG);
-////          LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
-//
-//          // Schedule next scan loop in 5 seconds if still disconnected
-//          if (!isDeviceConnected) {
-//            scanHandler.postDelayed(scanRunnable, 5000);
-//          }
-//        }, 15000);
-//
-//      } else {
-//        Log.d(TAG, "Device already connected. Skipping scan.");
-//        sendLog("Device already connected. Skipping scan.");
-////        intent.putExtra("LOG", "Device already connected. Skipping scan.");
-////        intent.putExtra("TAG", TAG);
-////        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
-//        scanHandler.postDelayed(this, 20000); // Check again in 20 seconds
-//      }
-//    }
-//  };
-
-  private boolean isConnectedToDevice() {
-    BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-    if (bluetoothManager != null) {
-      if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-        // TODO: Consider calling
-        //    ActivityCompat#requestPermissions
-        // here to request the missing permissions, and then overriding
-        //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-        //                                          int[] grantResults)
-        // to handle the case where the user grants the permission. See the documentation
-        // for ActivityCompat#requestPermissions for more details.
-        return false;
-      }
-
-      List<BluetoothDevice> connectedDevices = bluetoothManager.getConnectedDevices(BluetoothProfile.GATT);
-      for (BluetoothDevice device : connectedDevices) {
-        if (device.getAddress().equalsIgnoreCase(macAddress)) {
-          isDeviceConnected = true;
-          return true;
-        }
-      }
-    }
-    isDeviceConnected = false;
-    return false;
   }
 
   /**
@@ -955,24 +937,28 @@ public class BackgroundService extends Service {
 
     isScanning.set(false);
 
+    BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+
+    if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+      Log.e(TAG, "Cannot stop scan: Bluetooth Adapter is OFF or not available.");
+      return;
+    }
+
     if (bluetoothLeScanner != null) {
-      if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-        // TODO: Consider calling
-        //    ActivityCompat#requestPermissions
-        // here to request the missing permissions, and then overriding
-        //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-        //                                          int[] grantResults)
-        // to handle the case where the user grants the permission. See the documentation
-        // for ActivityCompat#requestPermissions for more details.
+      if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
+        != PackageManager.PERMISSION_GRANTED) {
+        // Handle permission request if needed
         return;
       }
-      bluetoothLeScanner.stopScan(scanCallback);
-      Log.d(TAG, "Stopped scanning.");
-//      sendLog("Stopped scanning....");
-//      Intent intent = new Intent("com.mobicloud.logs");
-//      intent.putExtra("LOG", "Stopped scanning....");
-//      intent.putExtra("TAG", TAG);
-//      LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+
+      try {
+        bluetoothLeScanner.stopScan(scanCallback);
+        Log.d(TAG, "Stopped scanning.");
+        sendLog("Stopped scanning.");
+
+      } catch (IllegalStateException e) {
+        Log.e(TAG, "Failed to stop scan: " + e.getMessage(), e);
+      }
     } else {
       Log.e(TAG, "Cannot stop scan: BluetoothLeScanner is null.");
     }
@@ -983,7 +969,8 @@ public class BackgroundService extends Service {
     public void onScanResult(int callbackType, ScanResult result) {
       if (result.getDevice().getAddress().equals(macAddress)) {
         Log.d(TAG, "Device found! Reconnecting...");
-//        sendLog("Device found! Reconnecting...");
+        sendLog("Device found! Reconnecting...");
+//        sendNotification("Device found! Reconnecting...");
 //        Intent intent = new Intent("com.mobicloud.logs");
 //        intent.putExtra("LOG", "Device found! Reconnecting...");
 //        intent.putExtra("TAG", TAG);
@@ -998,7 +985,7 @@ public class BackgroundService extends Service {
           // for ActivityCompat#requestPermissions for more details.
           return;
         }
-        bluetoothLeScanner.stopScan(scanCallback);
+        stopScanning();
         connectToDevice(macAddress);
       }
     }
@@ -1012,10 +999,11 @@ public class BackgroundService extends Service {
         if (state == BluetoothAdapter.STATE_ON) {
           Log.d(TAG,"Bluetooth Enabled Service active");
           updateNotification("Bluetooth enabled. Service active.");
-
           setupBluetoothMonitoring();
+
         } else if (state == BluetoothAdapter.STATE_OFF) {
           sendBluetoothNotification();
+          isBLEMonitoringInitialized = false;
         }
       }
     }
@@ -1037,15 +1025,22 @@ public class BackgroundService extends Service {
 
   public void connectToBroker(String BROKER_URL, String USERNAME, @NonNull String PASSWORD, MqttConnectionCallback callBack)
   {
-    String MqttclientId = "smart-gas-regulator";
-
     MQTT_URL = BROKER_URL;
 
     MQTT_USERNAME = USERNAME;
 
     MQTT_Password = PASSWORD;
 
-    this.mqttAndroidClient = new MqttAndroidClient(this.context, BROKER_URL, MqttclientId, Ack.AUTO_ACK,persistence,useReconnect,maxInflight);
+    SharedPreferences prefs = context.getSharedPreferences("mqtt_prefs", Context.MODE_PRIVATE);
+    String clientId = prefs.getString("mqtt_client_id", null);
+
+    if (clientId == null) {
+      clientId = "client_" + UUID.randomUUID().toString();
+      prefs.edit().putString("mqtt_client_id", clientId).apply();
+    }
+
+    this.mqttAndroidClient = new MqttAndroidClient(context, BROKER_URL, clientId, Ack.AUTO_ACK, persistence, useReconnect, maxInflight);
+
     MqttClientHolder.setClient(this.mqttAndroidClient);
 
     MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
@@ -1061,11 +1056,6 @@ public class BackgroundService extends Service {
         Log.d(TAG, "Connected to broker");
         System.out.println("Connected to MQTT Broker");
 
-//        Intent intent = new Intent("com.mobicloud.logs");
-//        intent.putExtra("LOG", "Connected to MQTT Broker");
-//        intent.putExtra("TAG", TAG);
-//        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
-
         if (callBack != null) {
           callBack.onConnectionSuccess();
         }
@@ -1075,12 +1065,6 @@ public class BackgroundService extends Service {
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to connect to broker", exception);
         System.out.println("Failed to connect to broker: "+exception);
-
-//        sendLog("Failed to connect to broker: "+exception);
-//        Intent intent = new Intent("com.mobicloud.logs");
-//        intent.putExtra("LOG", "Failed to connect to broker: "+exception);
-//        intent.putExtra("TAG", TAG);
-//        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
 
         if (callBack != null) {
           callBack.onConnectionFailure(exception);
@@ -1103,7 +1087,6 @@ public class BackgroundService extends Service {
           System.out.println("Exception Occurred While Reconnecting to MQTT Broker");
 
           throw new RuntimeException(e);
-
         }
       }
 
@@ -1130,63 +1113,71 @@ public class BackgroundService extends Service {
             regulatorId, data, sha
           );
 
-
-//          Log.d(TAG, "Formatted payload: " + formatted);
-
           BluetoothGatt gatt = BleClientHolder.getGatt();
           BluetoothGattCharacteristic characteristic = BleClientHolder.getRxCharacteristic();
 
-          if (packetType.equalsIgnoreCase("AuthDL")) {
-            Log.d(TAG, "Received Auth DL");
+          handler.postDelayed(() -> {
+            if (packetType.equalsIgnoreCase("AuthDL")) {
+              Log.d(TAG, "Received Auth DL");
 
-            // Save in SharedPreferences
-//            sharedPref.edit().putString("authDlData", formatted).apply();
+              if (gatt == null || characteristic == null) {
+                Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
+                return;
+              }
 
-            if (gatt == null || characteristic == null) {
-              Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
-              return;
+              if(isAuthDlWrittenToDevice == false) {
+                boolean bret = writeDataToDevice(characteristic, formatted);
+                if(bret == true)
+                {
+                  isAuthDlWrittenToDevice = true;
+                  authSentAfterReconnect = true;
+                }
+                else
+                {
+                  isAuthDlWrittenToDevice = false;
+                  authSentAfterReconnect = false;
+                }
+              }
+
+              // Step 3: Start 1.5s wait for notification
+              notificationReceived = false;
+
+              if (waitForAuthNotificationRunnable != null) {
+                handler.removeCallbacks(waitForAuthNotificationRunnable);
+              }
+
+              waitForAuthNotificationRunnable = () -> {
+                if (!notificationReceived) {
+                  Log.d(TAG, "No notification after Auth DL. Sending next normal DL.");
+                  sendNextNormalDl(); // ✅ Trigger your DL queue fallback
+                }
+              };
+
+              handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+            } else {
+              Log.d(TAG, "Received Normal DL. Adding to queue.");
+
+              // ✅ Store in normal DL queue
+              normalDlQueue.add(formatted);
+
+              Log.d(TAG,"Normal DL Queue is: "+normalDlQueue);
+              // Send if ready
+              if (gatt != null && characteristic != null && authSentAfterReconnect) {
+                sendNextNormalDl();
+              }
+
             }
-
-            boolean bret = writeDataToDevice(characteristic, formatted);
-            if(bret == true)
-            {
-              authSentAfterReconnect = true;
-            }
-            else
-            {
-              authSentAfterReconnect = false;
-            }
-          } else {
-            Log.d(TAG, "Received Normal DL. Adding to queue.");
-
-            // ✅ Store in normal DL queue
-            normalDlQueue.add(formatted);
-
-            Log.d(TAG,"Normal DL Queue is: "+normalDlQueue);
-            // Send if ready
-            if (gatt != null && characteristic != null && authSentAfterReconnect) {
-              sendNextNormalDl();
-            }
-
-          }
+          }, 500); // 300ms delay to let BLE stack stabilize
         } catch (Exception e) {
           Log.e(TAG, "Exception occurred while processing MQTT message", e);
         }
-
-        // 📨 If needed, broadcast message to the plugin (currently commented)
-        /*
-        Intent intent = new Intent("com.mobicloud.MQTT_MESSAGE");
-        intent.putExtra("message", msg);
-        intent.putExtra("topic", topic);
-        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
-        */
       }
 
       @Override
       public void deliveryComplete(IMqttDeliveryToken token) {
         Log.d(TAG, "Message delivery complete");
         System.out.println("Message Delivery Complete");
-//        sendLog("Message Delivery Complete");
+//        sendNotification("Message Delivery Complete");
       }
     });
   }
@@ -1194,7 +1185,7 @@ public class BackgroundService extends Service {
   public void subscribeToTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {
     if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
       Log.e(TAG, "MQTT client is not connected or initialized.");
-//      sendLog("MQTT client is not connected or initialized.");
+//      sendNotification("MQTT client is not connected or initialized.");
       return;
     }
 
@@ -1208,7 +1199,7 @@ public class BackgroundService extends Service {
         Log.d(TAG, "Subscribed to topic: " + topicToSubscribe);
         System.out.println("Subscribed to topic: " + topicToSubscribe);
 
-//        sendLog("Subscribed to topic: " + topicToSubscribe);
+//        sendNotification("Subscribed to topic: " + topicToSubscribe);
 //        Intent intent = new Intent("com.mobicloud.logs");
 //        intent.putExtra("LOG", "Subscribed to topic: "+topicToSubscribe);
 //        intent.putExtra("TAG", TAG);
@@ -1222,7 +1213,7 @@ public class BackgroundService extends Service {
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to subscribe to topic: " + topicToSubscribe, exception);
-//        sendLog("Failed to subscribe to topic: " + topicToSubscribe + exception);
+//        sendNotification("Failed to subscribe to topic: " + topicToSubscribe + exception);
 //        Intent intent = new Intent("com.mobicloud.logs");
 //        intent.putExtra("LOG", "Failed to subscribe to topic: "+topicToSubscribe);
 //        intent.putExtra("TAG", TAG);
@@ -1274,7 +1265,7 @@ public class BackgroundService extends Service {
 
     if (messageToUplink == null) {
       Log.e(TAG,"Empty Payload message cannot publish");
-//      sendLog("Empty Payload message cannot publish");
+//      sendNotification("Empty Payload message cannot publish");
       return;
     }
 
@@ -1288,7 +1279,7 @@ public class BackgroundService extends Service {
 
         Log.e(TAG, "MQTT client is not connected.");
         System.out.println("MQTT Client is not Connected");
-//        sendLog("MQTT Client is not Connected");
+//        sendNotification("MQTT Client is not Connected");
 
         return;
       }
@@ -1305,7 +1296,7 @@ public class BackgroundService extends Service {
           Log.d(TAG, "Message published to topic: " + uplinkTopic + " with payload: " + messageToUplink);
 
           System.out.println("Message successfully published: " + messageToUplink);
-//          sendLog("Message successfully published: " + messageToUplink);
+//          sendNotification("Message successfully published: " + messageToUplink);
 
           // Send success response to the JS side
           JSObject result = new JSObject();
@@ -1318,7 +1309,7 @@ public class BackgroundService extends Service {
           Log.d(TAG, "Failed to publish to topic: " + uplinkTopic + " with payload: " + messageToUplink);
           System.out.println("Failed to publish to topic: " + uplinkTopic + " with payload: " + messageToUplink);
 
-//          sendLog("Failed to publish to topic: " + uplinkTopic + " with payload: " + messageToUplink);
+//          sendNotification("Failed to publish to topic: " + uplinkTopic + " with payload: " + messageToUplink);
         }
       });
     } catch (Exception e) {
@@ -1415,6 +1406,8 @@ public class BackgroundService extends Service {
         @Override
         public void onSuccess(IMqttToken asyncActionToken) {
           Log.d(TAG, "Message published immediately");
+          sendMqttPublishStatus("Message published immediately" + mqttMessage);
+
           if (callback != null) callback.onSuccess();
         }
 
@@ -1435,7 +1428,7 @@ public class BackgroundService extends Service {
   public void onDestroy() {
     super.onDestroy();
     Log.d(TAG, "Service destroyed");
-//    sendLog("Service destroyed");
+//    sendNotification("Service destroyed");
     macAddress = null;
 //    stopPeriodicRead();
     if (bluetoothStateReceiver != null) {
