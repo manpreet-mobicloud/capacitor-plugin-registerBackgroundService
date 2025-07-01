@@ -84,7 +84,22 @@ public class BackgroundServicePlugin extends Plugin {
         };
         LocalBroadcastManager.getInstance(getContext()).registerReceiver(logReceiver, new IntentFilter("com.mobicloud.logs"));
       }
-        call.resolve();
+
+      if (mqttReceiver == null) {
+        mqttReceiver = new BroadcastReceiver() {
+          @Override
+          public void onReceive(Context context, Intent intent) {
+            String mqttPublishStatus = intent.getStringExtra("mqttPublishStatus");
+
+            JSObject data = new JSObject();
+
+            data.put("mqttPublishStatus", mqttPublishStatus);
+            notifyListeners("onMqttMessage", data);
+          }
+        };
+        LocalBroadcastManager.getInstance(getContext()).registerReceiver(mqttReceiver, new IntentFilter("com.mobicloud.MQTT_MESSAGE"));
+      }
+      call.resolve();
     }
 
     @PluginMethod
@@ -124,21 +139,6 @@ public class BackgroundServicePlugin extends Plugin {
         }
 
         JSObject res = new JSObject();
-
-        if (mqttReceiver == null) {
-          mqttReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-              String mqttPublishStatus = intent.getStringExtra("mqttPublishStatus");
-
-              JSObject data = new JSObject();
-
-              data.put("mqttPublishStatus", mqttPublishStatus);
-              notifyListeners("onMqttMessage", data);
-            }
-          };
-          LocalBroadcastManager.getInstance(getContext()).registerReceiver(mqttReceiver, new IntentFilter("com.mobicloud.MQTT_MESSAGE"));
-        }
 
         bobj.connectToBroker(brokerUrl, username, password, new MqttConnectionCallback() {
 

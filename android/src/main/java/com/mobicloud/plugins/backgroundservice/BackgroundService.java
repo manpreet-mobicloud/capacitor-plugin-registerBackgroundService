@@ -242,7 +242,7 @@ public class BackgroundService extends Service {
     Intent intent = new Intent("com.mobicloud.notifcationLogs");
     intent.putExtra("notification", message);
 
-    LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
   }
 
   private void sendLog(String message) {
@@ -250,14 +250,14 @@ public class BackgroundService extends Service {
     intent.putExtra("LOG",message);
     intent.putExtra("TAG", TAG);
 
-    LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
   }
 
   private void sendMqttPublishStatus(String message) {
     Intent intent = new Intent("com.mobicloud.MQTT_MESSAGE");
     intent.putExtra("mqttPublishStatus", message);
 
-    LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
   }
 
   private final Runnable authDlCheckRunnable = new Runnable() {
@@ -864,6 +864,7 @@ public class BackgroundService extends Service {
 
         handler.postDelayed(waitForAuthNotificationRunnable, 10000);
         Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
+        sendLog("Waiting For 10 Sec before sending next normal DL");
       }
     }, 1500); // 300ms delay to let BLE stack stabilize
   }
@@ -912,12 +913,14 @@ public class BackgroundService extends Service {
     waitForDlNotificationRunnable = () -> {
       if (!notificationReceived) {
         Log.d(TAG, "No notification after 10s for Normal DL. Sending next.");
+        sendLog("No notification after 10s for Normal DL. Sending next.");
         sendNextNormalDl();
       }
     };
 
     handler.postDelayed(waitForDlNotificationRunnable, 10000);
     Log.d(TAG, "Waiting 10s for notification for Normal DL...");
+    sendLog("Waiting 10s for notification for Normal DL...");
   }
 
   private void startScanningForDevice() {
@@ -1107,6 +1110,7 @@ public class BackgroundService extends Service {
       @Override
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Connected to broker");
+        sendLog("Connected to broker");
         if (callBack != null) {
           callBack.onConnectionSuccess();
         }
@@ -1115,6 +1119,7 @@ public class BackgroundService extends Service {
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to connect to broker", exception);
+        sendLog("Failed to connect to broker"+ exception);
         if (callBack != null) {
           callBack.onConnectionFailure(exception);
         }
@@ -1139,6 +1144,8 @@ public class BackgroundService extends Service {
           String msg = new String(message.getPayload());
           Log.d(TAG, "MQTT messageArrived hash=" + message.hashCode() + ", topic=" + topic);
           Log.d(TAG, "Payload: " + msg);
+
+          sendLog("MQTT messageArrived"+msg);
 
           // 🛡️ Deduplication: Skip if same as last processed
           if (msg.equals(lastProcessedPayload)) {
@@ -1165,7 +1172,7 @@ public class BackgroundService extends Service {
             handler.postDelayed(() -> {
               if (!isAuthDlWrittenToDevice && "AuthDL".equalsIgnoreCase(packetType)) {
                 Log.d(TAG, "Received Auth DL: " + formatted);
-
+                sendLog("Received Auth DL: " + formatted);
                 if (gatt == null || characteristic == null) {
                   Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
                   return;
@@ -1197,8 +1204,10 @@ public class BackgroundService extends Service {
 
                 handler.postDelayed(waitForAuthNotificationRunnable, 10000);
                 Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
+                sendLog("Waiting For 10 Sec before sending next normal DL");
               } else {
                 Log.d(TAG, "Received Normal DL. Adding to queue.");
+                sendLog("Received Normal DL. Adding to queue.\""+formatted);
                 normalDlQueue.add(formatted);
                 if (gatt != null && characteristic != null && authSentAfterReconnect) {
                   sendNextNormalDl();
@@ -1214,6 +1223,7 @@ public class BackgroundService extends Service {
         @Override
         public void deliveryComplete(IMqttDeliveryToken token) {
           Log.d(TAG, "Message delivery complete");
+          sendLog("Message delivery complete");
         }
       });
 
@@ -1237,6 +1247,7 @@ public class BackgroundService extends Service {
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Subscribed to topic: " + topicToSubscribe);
         System.out.println("Subscribed to topic: " + topicToSubscribe);
+        sendLog("Subscribed to topic: " + topicToSubscribe);
 
         if(mqttDownlinkCallBack != null) {
           mqttDownlinkCallBack.onSuccess();
@@ -1246,7 +1257,7 @@ public class BackgroundService extends Service {
       @Override
       public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
         Log.e(TAG, "Failed to subscribe to topic: " + topicToSubscribe, exception);
-
+        sendLog("Failed to subscribe to topic: " + topicToSubscribe+ exception);
         if(mqttDownlinkCallBack != null) {
           mqttDownlinkCallBack.onFailure(exception);
         }
@@ -1319,6 +1330,7 @@ public class BackgroundService extends Service {
         @Override
         public void onSuccess(IMqttToken asyncActionToken) {
           Log.d(TAG, "Message published after reconnect");
+          sendLog("Message published after reconnect"+message);
           if (callback != null) callback.onSuccess();
         }
 
@@ -1343,6 +1355,7 @@ public class BackgroundService extends Service {
         @Override
         public void onSuccess(IMqttToken asyncActionToken) {
           Log.d(TAG, "Message published immediately");
+          sendLog("Message published immediately"+message);
           sendMqttPublishStatus("Message published immediately" + mqttMessage);
 
           if (callback != null) callback.onSuccess();
