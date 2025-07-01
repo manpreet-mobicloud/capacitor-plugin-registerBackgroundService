@@ -348,6 +348,10 @@ public class BackgroundService extends Service {
         String data = resultObject.getString("Data");
         String sha = resultObject.getString("SHA");
 
+//        authDlData = String.format(
+//          "{\"Regulatorid \": \"%s\",\n\"Data\" : \"%s\",\n\"SHA\" : \"%s\"}",
+//          regulatorId, data, sha
+//        );
         // Build the string same as JavaScript
         authDlData = String.format("{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",regulatorId, data, sha);
 
@@ -1160,6 +1164,11 @@ public class BackgroundService extends Service {
             String regulatorId = json.getString("Regulatorid ");
             String data = json.getString("Data");
             String sha = json.getString("SHA");
+
+//            String formatted = String.format(
+//              "{\"Regulatorid \": \"%s\",\n\"Data\" : \"%s\",\n\"SHA\" : \"%s\"}",
+//              regulatorId, data, sha
+//            );
 
             String formatted = String.format(
               "{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",
