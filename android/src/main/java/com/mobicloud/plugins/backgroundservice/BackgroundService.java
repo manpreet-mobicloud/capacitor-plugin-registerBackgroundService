@@ -119,6 +119,9 @@ public class BackgroundService extends Service {
   private String lastProcessedPayload = null;
 
   private Runnable waitForAuthNotificationRunnable;
+
+  private Runnable waitForDlNotificationRunnable;
+
   private boolean notificationReceived = false;
 
   // Define persistence
@@ -710,18 +713,22 @@ public class BackgroundService extends Service {
         handler.removeCallbacks(waitForAuthNotificationRunnable);
       }
 
-      start1sWaitForNextUlOrDl();
+      if (waitForDlNotificationRunnable != null) {
+        handler.removeCallbacks(waitForDlNotificationRunnable);
+      }
+
+      startWaitForNextDl();
     }
 
-    private void start1sWaitForNextUlOrDl() {
+    private void startWaitForNextDl() {
       if (waitAfterUlRunnable != null) handler.removeCallbacks(waitAfterUlRunnable);
 
       waitAfterUlRunnable = () -> {
-        Log.d(TAG, "1s passed after UL, sending next normal DL.");
+        Log.d(TAG, "1.5s passed after UL, sending next normal DL.");
         sendNextNormalDl();
       };
 
-      handler.postDelayed(waitAfterUlRunnable, 1000);
+      handler.postDelayed(waitAfterUlRunnable, 1500);
     }
 
     @Override
@@ -849,13 +856,14 @@ public class BackgroundService extends Service {
 
         waitForAuthNotificationRunnable = () -> {
           if (!notificationReceived) {
-            Log.d(TAG, "No notification after Auth DL. Sending next normal DL.");
-            sendLog("No notification after Auth DL. Sending next normal DL.");
+            Log.d(TAG, "No notification after 10s of Auth DL. Sending next normal DL.");
+            sendLog("No notification after 10s of Auth DL. Sending next normal DL.");
             sendNextNormalDl(); // ✅ Trigger your DL queue fallback
           }
         };
 
-        handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+        handler.postDelayed(waitForAuthNotificationRunnable, 10000);
+        Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
       }
     }, 1500); // 300ms delay to let BLE stack stabilize
   }
@@ -863,7 +871,6 @@ public class BackgroundService extends Service {
   private void sendNextNormalDl() {
     if (!authSentAfterReconnect) {
       Log.d(TAG, "Auth DL not yet sent. Skipping normal DL.");
-//      sendLog("Auth DL not yet sent. Skipping normal DL.");
       return;
     }
 
@@ -875,46 +882,42 @@ public class BackgroundService extends Service {
     BluetoothGatt gatt = BleClientHolder.getGatt();
     BluetoothGattCharacteristic characteristic = BleClientHolder.getRxCharacteristic();
 
-    String nextDl = normalDlQueue.poll(); // take the item off the queue
+    String nextDl = normalDlQueue.poll();
 
     if (gatt == null || characteristic == null) {
       Log.w(TAG, "BLE not ready. Re-queuing normal DL.");
-      normalDlQueue.add(nextDl); // 🔁 put it back
+      normalDlQueue.add(nextDl);
       return;
     }
 
     Log.d(TAG, "Sending Normal DL: " + nextDl);
-//    sendLog("Sending Normal DL: " + nextDl);
-    boolean bret = writeDataToDevice(characteristic, nextDl); // fire write
+    boolean bret = writeDataToDevice(characteristic, nextDl);
 
-    if(bret == true) {
-      Log.d(TAG,"Normal DL Successfully written to device");
-//      sendLog("Normal DL Successfully written to device");
+    if (bret) {
+      Log.d(TAG, "Normal DL Successfully written to device");
     } else {
-      Log.d(TAG,"Failed to write normal DL to device");
-//      sendLog("Failed to write normal DL to device");
+      Log.d(TAG, "Failed to write normal DL to device");
       normalDlQueue.add(nextDl);
       return;
     }
+
     notificationReceived = false;
 
-    if (waitForAuthNotificationRunnable != null) {
-      handler.removeCallbacks(waitForAuthNotificationRunnable);
+    // ✅ Remove old timeout if exists
+    if (waitForDlNotificationRunnable != null) {
+      handler.removeCallbacks(waitForDlNotificationRunnable);
     }
 
-    waitForAuthNotificationRunnable = () -> {
+    // ✅ Set new 10s timeout in case no notification is received
+    waitForDlNotificationRunnable = () -> {
       if (!notificationReceived) {
-        Log.d(TAG, "No notification after 1.5s. Sending next normal DL.");
-//        sendLog("No notification after 1.5s. Sending next normal DL.");
-        sendNextNormalDl(); // try next one
-      } else {
-        Log.d(TAG, "Notification received. Waiting 1s to send next DL.");
-//        sendLog("Notification received. Waiting 1s to send next DL.");
-        handler.postDelayed(this::sendNextNormalDl, 1000);
+        Log.d(TAG, "No notification after 10s for Normal DL. Sending next.");
+        sendNextNormalDl();
       }
     };
 
-    handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+    handler.postDelayed(waitForDlNotificationRunnable, 10000);
+    Log.d(TAG, "Waiting 10s for notification for Normal DL...");
   }
 
   private void startScanningForDevice() {
@@ -1187,12 +1190,13 @@ public class BackgroundService extends Service {
 
                 waitForAuthNotificationRunnable = () -> {
                   if (!notificationReceived) {
-                    Log.d(TAG, "No notification after Auth DL. Sending next normal DL.");
+                    Log.d(TAG, "No notification after 10s of Auth DL. Sending next normal DL.");
                     sendNextNormalDl();
                   }
                 };
 
-                handler.postDelayed(waitForAuthNotificationRunnable, 1500);
+                handler.postDelayed(waitForAuthNotificationRunnable, 10000);
+                Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
               } else {
                 Log.d(TAG, "Received Normal DL. Adding to queue.");
                 normalDlQueue.add(formatted);
