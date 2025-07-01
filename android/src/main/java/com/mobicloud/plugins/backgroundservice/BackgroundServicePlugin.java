@@ -82,7 +82,7 @@ public class BackgroundServicePlugin extends Plugin {
             notifyListeners("onLogs", logData);
           }
         };
-        LocalBroadcastManager.getInstance(getContext()).registerReceiver(notificationReceiver, new IntentFilter("com.mobicloud.logs"));
+        LocalBroadcastManager.getInstance(getContext()).registerReceiver(logReceiver, new IntentFilter("com.mobicloud.logs"));
       }
         call.resolve();
     }
@@ -169,31 +169,6 @@ public class BackgroundServicePlugin extends Plugin {
 
 
       bobj.subscribeToTopic(topicToSubscribe, new MqttDownlinkCallBack() {
-
-            @Override
-            public void onSuccess() {
-                res.put("isSubscriptionSuccess", true);
-                call.resolve(res);
-            }
-
-            @Override
-            public void onFailure(Throwable exception) {
-                call.reject(exception.toString());
-            }
-        });
-    }
-
-    @PluginMethod
-    public void subscribeToAuthTopic(PluginCall call) {
-        String topicToSubscribe = call.getString("authTopicToSubscribe");
-        JSObject res = new JSObject();
-
-        if (bobj == null) {
-            call.reject("BackgroundService is not initialized. Ensure the service is started.");
-            return;
-        }
-
-        bobj.subscribeToAuthTopic(topicToSubscribe, new MqttDownlinkCallBack() {
 
             @Override
             public void onSuccess() {
