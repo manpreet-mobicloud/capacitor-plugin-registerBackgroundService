@@ -25,6 +25,10 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -63,6 +67,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -96,7 +101,7 @@ public class BackgroundService extends Service {
   private volatile boolean isBleReady = false;
   private String pendingBlePayload = null;
 
-  private String MQTT_URL = "";
+  private static String MQTT_URL = "";
 
   private boolean isMqttCallbackSet = false;
 
@@ -104,9 +109,9 @@ public class BackgroundService extends Service {
 
   private boolean isConnecting = false;
 
-  private String MQTT_USERNAME = "";
+  private static String MQTT_USERNAME = "";
 
-  private String MQTT_Password = "";
+  private static String MQTT_Password = "";
 
   private boolean isDeviceConnected = false;
 
@@ -136,12 +141,15 @@ public class BackgroundService extends Service {
   private static String DEVICE_TYPE = "";
 
   private static String TOPIC_to_Publish = " ";
+
+  private static String TOPIC_to_Subscribe= " ";
   private static String BASE_URL = "";
   private static String BASIC_AUTH = "";
   private static String DEVICE_UUID = "";
   private static String API_SUFFIX = "";
   private static String API_PAYLOAD = "";
 
+  private static boolean isInternetAvailable = false;
   private Context context;
 
   private static Context appContext;
@@ -191,6 +199,7 @@ public class BackgroundService extends Service {
     instance = this;
     createNotificationChannel();
     startForegroundServiceCompat();
+    registerNetworkCallback();
 
     sharedPref = getApplicationContext().getSharedPreferences("SmartRegulatorPrefs", Context.MODE_PRIVATE);
   }
@@ -234,6 +243,66 @@ public class BackgroundService extends Service {
   public IBinder onBind(Intent intent) {
     return null;
   }
+
+  private void registerNetworkCallback() {
+    ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+
+    if (connectivityManager != null) {
+      NetworkRequest request = new NetworkRequest.Builder()
+        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        .build();
+
+      connectivityManager.registerNetworkCallback(request, new ConnectivityManager.NetworkCallback() {
+        @Override
+        public void onAvailable(@NonNull Network network) {
+          isInternetAvailable = true;
+          Log.d(TAG, "Internet is available again!");
+          sendLog("Internet is available again!");
+          mqttAndroidClient = MqttClientHolder.getClient();
+
+          if(mqttAndroidClient != null) {
+            MqttConnectOptions options = new MqttConnectOptions();
+            options.setAutomaticReconnect(false);
+            options.setCleanSession(true);
+            options.setKeepAliveInterval(60);
+            options.setUserName(MQTT_USERNAME);
+            options.setPassword(MQTT_Password.toCharArray());
+
+            mqttAndroidClient.connect(options, getContext(), new IMqttActionListener() {
+              @Override
+              public void onSuccess(IMqttToken asyncActionToken) {
+                Log.d(TAG, "Connected to broker");
+                sendLog("Connected to broker");
+
+                subscribeToTopic(TOPIC_to_Subscribe,null);
+
+                // Also push stored BLE messages
+                Set<String> stored = getStoredNotifications();
+                for (String msg : stored) {
+                  publishNow(Constants.PUBLISH_TO_TOPIC, msg, null);
+                }
+                clearStoredNotifications();
+              }
+
+              @Override
+              public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                Log.e(TAG, "Failed to connect to broker", exception);
+                sendLog("Failed to connect to broker"+ exception);
+              }
+            });
+          }
+        }
+        @Override
+        public void onLost(@NonNull Network network) {
+          Log.d(TAG, "Internet connection lost.");
+          Toast.makeText(getBaseContext(),"Internet connection is required",Toast.LENGTH_LONG).show();
+          sendLog("Internet connection lost.");
+          isInternetAvailable = false;
+        }
+      });
+    }
+  }
+
 
   private void sendNotification(String message) {
 //    Log.d(TAG, message);
@@ -298,6 +367,9 @@ public class BackgroundService extends Service {
 
   private void sendHttpRequest(String urlString, String jsonPayload, String authHeader) {
     System.out.println(urlString);
+    SharedPreferences.Editor editor = sharedPref.edit();
+    editor.remove("authDlData");
+    editor.apply(); // or editor.commit();
 
     if (urlString == null || urlString.trim().isEmpty()) {
       Log.e("BackgroundService", "URL is empty or null, aborting HTTP request.");
@@ -355,7 +427,6 @@ public class BackgroundService extends Service {
         // Build the string same as JavaScript
         authDlData = String.format("{\"Regulatorid \": \"%s\",\"Data\" : \"%s\",\"SHA\" : \"%s\"}",regulatorId, data, sha);
 
-        SharedPreferences.Editor editor = sharedPref.edit();
         editor.putString("authDlData", authDlData);
         editor.apply(); // or editor.commit();
 
@@ -580,6 +651,24 @@ public class BackgroundService extends Service {
     }
   }
 
+
+  public void saveNotification(String message) {
+    SharedPreferences prefs = getAppContext().getSharedPreferences("ble_notifications", MODE_PRIVATE);
+    Set<String> set = new HashSet<>(prefs.getStringSet("pending_messages", new HashSet<>()));
+    set.add(message);  // Add new message
+    prefs.edit().putStringSet("pending_messages", set).apply();
+  }
+
+  public Set<String> getStoredNotifications() {
+    SharedPreferences prefs = getAppContext().getSharedPreferences("ble_notifications", MODE_PRIVATE);
+    return new HashSet<>(prefs.getStringSet("pending_messages", new HashSet<>()));
+  }
+
+  public void clearStoredNotifications() {
+    SharedPreferences prefs = getAppContext().getSharedPreferences("ble_notifications", MODE_PRIVATE);
+    prefs.edit().remove("pending_messages").apply();
+  }
+
   private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
 
     @Override
@@ -678,6 +767,8 @@ public class BackgroundService extends Service {
 
       String jsonString = new String(value, StandardCharsets.UTF_8);
 
+      // Sanitize the JSON if needed (already done in your code)
+
       // Ensure starts with {
       if (!jsonString.startsWith("{")) {
         jsonString = "{" + jsonString;
@@ -705,35 +796,46 @@ public class BackgroundService extends Service {
         String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
         json.put("timestamp", timestamp);
 
-        Log.d(TAG, "MQTT Payload: " + json.toString());
-        publishMessage(Constants.PUBLISH_TO_TOPIC, json.toString(), null);
+        if(isInternetAvailable)
+        {
+          publishMessage(Constants.PUBLISH_TO_TOPIC, json.toString(), null);
+        }
+        else
+        {
+          sendLog("Internet is not available notification is save and will be published once internet is available");
+          saveNotification(json.toString());
+        }
       } catch (Exception e) {
-        Log.e(TAG, "Failed to add timestamp or publish MQTT message", e);
+        Log.e(TAG, "Failed to process MQTT payload", e);
       }
 
       notificationReceived = true;
 
-      if (waitForAuthNotificationRunnable != null) {
-        handler.removeCallbacks(waitForAuthNotificationRunnable);
+      // Cancel any previously queued post-notification DL send
+      if (waitAfterUlRunnable != null) {
+        handler.removeCallbacks(waitAfterUlRunnable);
       }
 
-      if (waitForDlNotificationRunnable != null) {
-        handler.removeCallbacks(waitForDlNotificationRunnable);
-      }
-
-      startWaitForNextDl();
-    }
-
-    private void startWaitForNextDl() {
-      if (waitAfterUlRunnable != null) handler.removeCallbacks(waitAfterUlRunnable);
-
+      // ✅ Wait 5 seconds after notification, then send next normal DL
       waitAfterUlRunnable = () -> {
-        Log.d(TAG, "1.5s passed after UL, sending next normal DL.");
+        Log.d(TAG, "5 seconds passed after notification. Sending next normal DL.");
+        sendLog("5 seconds passed after notification. Sending next normal DL.");
         sendNextNormalDl();
       };
 
-      handler.postDelayed(waitAfterUlRunnable, 1500);
+      handler.postDelayed(waitAfterUlRunnable, 5000);
     }
+
+//    private void startWaitForNextDl() {
+//      if (waitAfterUlRunnable != null) handler.removeCallbacks(waitAfterUlRunnable);
+//
+//      waitAfterUlRunnable = () -> {
+//        Log.d(TAG, "1.5s passed after UL, sending next normal DL.");
+//        sendNextNormalDl();
+//      };
+//
+//      handler.postDelayed(waitAfterUlRunnable, 1500);
+//    }
 
     @Override
     public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
@@ -837,8 +939,8 @@ public class BackgroundService extends Service {
         Boolean bret = writeDataToDevice(rxCharacteristics, authDlData);
 
         if (bret == true) {
-          Log.d(TAG, "Auth DL Successfully Written to device after reconnection");
-          sendLog("Auth DL Successfully Written to device after reconnection");
+          Log.d(TAG, "Auth DL Successfully Written to device after reconnection waiting for notifications");
+          sendLog("Auth DL Successfully Written to device after reconnection waiting for notifications");
           isAuthDlWrittenToDevice = true;
 
           authSentAfterReconnect = true;
@@ -851,24 +953,7 @@ public class BackgroundService extends Service {
           return;
         }
 
-        // Step 3: Start 1.5s wait for notification
         notificationReceived = false;
-
-        if (waitForAuthNotificationRunnable != null) {
-          handler.removeCallbacks(waitForAuthNotificationRunnable);
-        }
-
-        waitForAuthNotificationRunnable = () -> {
-          if (!notificationReceived) {
-            Log.d(TAG, "No notification after 10s of Auth DL. Sending next normal DL.");
-            sendLog("No notification after 10s of Auth DL. Sending next normal DL.");
-            sendNextNormalDl(); // ✅ Trigger your DL queue fallback
-          }
-        };
-
-        handler.postDelayed(waitForAuthNotificationRunnable, 10000);
-        Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
-        sendLog("Waiting For 10 Sec before sending next normal DL");
       }
     }, 1500); // 300ms delay to let BLE stack stabilize
   }
@@ -881,6 +966,7 @@ public class BackgroundService extends Service {
 
     if (normalDlQueue.isEmpty()) {
       Log.d(TAG, "Normal DL queue is empty.");
+      sendLog("Normal DL queue is empty.");
       return;
     }
 
@@ -896,35 +982,41 @@ public class BackgroundService extends Service {
     }
 
     Log.d(TAG, "Sending Normal DL: " + nextDl);
+    sendLog("Sending Normal DL: " + nextDl);
     boolean bret = writeDataToDevice(characteristic, nextDl);
 
     if (bret) {
-      Log.d(TAG, "Normal DL Successfully written to device");
-    } else {
-      Log.d(TAG, "Failed to write normal DL to device");
-      normalDlQueue.add(nextDl);
-      return;
-    }
+      Log.d(TAG, "Normal DL written. Waiting 5s for notification...");
+      sendLog("Normal DL written. Waiting 5s for notification...");
+      notificationReceived = false;
 
-    notificationReceived = false;
-
-    // ✅ Remove old timeout if exists
-    if (waitForDlNotificationRunnable != null) {
-      handler.removeCallbacks(waitForDlNotificationRunnable);
-    }
-
-    // ✅ Set new 10s timeout in case no notification is received
-    waitForDlNotificationRunnable = () -> {
-      if (!notificationReceived) {
-        Log.d(TAG, "No notification after 10s for Normal DL. Sending next.");
-        sendLog("No notification after 10s for Normal DL. Sending next.");
-        sendNextNormalDl();
+      if (waitForDlNotificationRunnable != null) {
+        handler.removeCallbacks(waitForDlNotificationRunnable);
       }
-    };
 
-    handler.postDelayed(waitForDlNotificationRunnable, 10000);
-    Log.d(TAG, "Waiting 10s for notification for Normal DL...");
-    sendLog("Waiting 10s for notification for Normal DL...");
+      // 🕒 Start 5s wait to *see* if notification comes
+      waitForDlNotificationRunnable = () -> {
+        if (notificationReceived) {
+          // 🕒 Notification came within 5s → wait 5 more seconds before next DL
+          Log.d(TAG, "Notification received within 5s. Waiting 5 more sec...");
+          sendLog("Notification received within 5s. Waiting 5 more sec...");
+          handler.postDelayed(() -> {
+            sendNextNormalDl();
+          }, 5000);
+        } else {
+          Log.d(TAG, "No notification within 5s. Not sending next normal DL.");
+          sendLog("No notification within 5s. Not sending next normal DL.");
+          // Don't send anything — just stop
+        }
+      };
+
+      handler.postDelayed(waitForDlNotificationRunnable, 5000);
+
+    } else {
+      Log.d(TAG, "Failed to write normal DL. Re-queuing...");
+      sendLog("Failed to write normal DL. Re-queuing...");
+      normalDlQueue.add(nextDl);
+    }
   }
 
   private void startScanningForDevice() {
@@ -1084,7 +1176,7 @@ public class BackgroundService extends Service {
     MQTT_USERNAME = USERNAME;
     MQTT_Password = PASSWORD;
 
-    SharedPreferences prefs = context.getSharedPreferences("mqtt_prefs", Context.MODE_PRIVATE);
+    SharedPreferences prefs = getAppContext().getSharedPreferences("mqtt_prefs", Context.MODE_PRIVATE);
     String clientId = prefs.getString("mqtt_client_id", null);
 
     if (clientId == null) {
@@ -1100,21 +1192,31 @@ public class BackgroundService extends Service {
       return;
     }
 
-    mqttAndroidClient = new MqttAndroidClient(context, BROKER_URL, clientId, Ack.AUTO_ACK, persistence, useReconnect, maxInflight);
+    mqttAndroidClient = new MqttAndroidClient(getAppContext(), MQTT_URL, clientId, Ack.AUTO_ACK,null,false,1000);
     MqttClientHolder.setClient(mqttAndroidClient);
 
-    MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
-    mqttConnectOptions.setAutomaticReconnect(true);
-    mqttConnectOptions.setCleanSession(true);
-    mqttConnectOptions.setUserName(USERNAME);
-    mqttConnectOptions.setPassword(PASSWORD.toCharArray());
-    mqttConnectOptions.setKeepAliveInterval(60);
+    MqttConnectOptions options = new MqttConnectOptions();
+    options.setAutomaticReconnect(true);
+    options.setCleanSession(true);
+    options.setKeepAliveInterval(60);
+    options.setUserName(MQTT_USERNAME);
+    options.setPassword(MQTT_Password.toCharArray());
 
-    mqttAndroidClient.connect(mqttConnectOptions, getContext(), new IMqttActionListener() {
+    mqttAndroidClient.connect(options, getContext(), new IMqttActionListener() {
       @Override
       public void onSuccess(IMqttToken asyncActionToken) {
         Log.d(TAG, "Connected to broker");
         sendLog("Connected to broker");
+
+        subscribeToTopic(TOPIC_to_Subscribe,null);
+
+        // Also push stored BLE messages
+        Set<String> stored = getStoredNotifications();
+        for (String msg : stored) {
+          publishNow(Constants.PUBLISH_TO_TOPIC, msg, null);
+        }
+        clearStoredNotifications();
+
         if (callBack != null) {
           callBack.onConnectionSuccess();
         }
@@ -1136,11 +1238,6 @@ public class BackgroundService extends Service {
         @Override
         public void connectionLost(Throwable cause) {
           Log.e(TAG, "Connection lost", cause);
-          try {
-            mqttAndroidClient.reconnect();
-          } catch (MqttException e) {
-            Log.e(TAG, "Exception during reconnect", e);
-          }
         }
 
         @Override
@@ -1189,37 +1286,26 @@ public class BackgroundService extends Service {
 
                 boolean bret = writeDataToDevice(characteristic, formatted);
 
-                if(bret == true) {
+                if (bret) {
                   isAuthDlWrittenToDevice = true;
                   authSentAfterReconnect = true;
-                }
-                else
-                {
+                  notificationReceived = false;
+
+                  Log.d(TAG, "Auth DL written to device. Waiting for notification...");
+                  sendLog("Auth DL written to device. Waiting for notification...");
+                  // ❌ No fallback timer here — notification MUST be received to continue
+                } else {
                   isAuthDlWrittenToDevice = false;
                   authSentAfterReconnect = false;
+                  Log.d(TAG, "Failed to write Auth DL.");
                 }
 
-                notificationReceived = false;
-                if (waitForAuthNotificationRunnable != null) {
-                  handler.removeCallbacks(waitForAuthNotificationRunnable);
-                }
-
-                waitForAuthNotificationRunnable = () -> {
-                  if (!notificationReceived) {
-                    Log.d(TAG, "No notification after 10s of Auth DL. Sending next normal DL.");
-                    sendNextNormalDl();
-                  }
-                };
-
-                handler.postDelayed(waitForAuthNotificationRunnable, 10000);
-                Log.d(TAG,"Waiting For 10 Sec before sending next normal DL");
-                sendLog("Waiting For 10 Sec before sending next normal DL");
               } else {
                 Log.d(TAG, "Received Normal DL. Adding to queue.");
-                sendLog("Received Normal DL. Adding to queue.\""+formatted);
+                sendLog("Received Normal DL. Adding to queue: " + formatted);
                 normalDlQueue.add(formatted);
                 if (gatt != null && characteristic != null && authSentAfterReconnect) {
-                  sendNextNormalDl();
+                  sendNextNormalDl();  // This now follows strict notif → 5s → next DL logic
                 }
               }
             }, 1500);
@@ -1241,6 +1327,7 @@ public class BackgroundService extends Service {
   }
 
   public void subscribeToTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {
+    TOPIC_to_Subscribe = topicToSubscribe;
     if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
       Log.e(TAG, "MQTT client is not connected or initialized.");
 //      sendNotification("MQTT client is not connected or initialized.");
@@ -1285,6 +1372,18 @@ public class BackgroundService extends Service {
 
     try {
       mqttAndroidClient = MqttClientHolder.getClient();
+      SharedPreferences prefs = getSharedPreferences("mqtt_prefs", Context.MODE_PRIVATE);
+      String clientId = prefs.getString("mqtt_client_id", null);
+
+      if (clientId == null) {
+        clientId = "client_" + UUID.randomUUID().toString();
+        prefs.edit().putString("mqtt_client_id", clientId).apply();
+      }
+
+      if (mqttAndroidClient != null && mqttAndroidClient.isConnected()) {
+        Log.d(TAG, "MQTT already connected. Skipping reconnect.");
+      }
+
 
       if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
         Log.e(TAG, "MQTT client is null or disconnected. Attempting to reconnect...");
@@ -1296,7 +1395,7 @@ public class BackgroundService extends Service {
         }
 
         // Reinitialize
-        mqttAndroidClient = new MqttAndroidClient(this.context, MQTT_URL, "smart-gas-regulator", Ack.AUTO_ACK,persistence,useReconnect,maxInflight);
+        mqttAndroidClient = new MqttAndroidClient(getAppContext(), MQTT_URL,clientId , Ack.AUTO_ACK,null,false,1000);
         MqttClientHolder.setClient(mqttAndroidClient);
 
         MqttConnectOptions options = new MqttConnectOptions();
@@ -1372,8 +1471,10 @@ public class BackgroundService extends Service {
 
         @Override
         public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+          saveNotification(message);
+
           Log.e(TAG, "Immediate publish failed", exception);
-          sendMqttPublishStatus("Message published immediately" + mqttMessage);
+          sendMqttPublishStatus("Immediate publish failed");
           if (callback != null) callback.onFailure(exception);
         }
       });
