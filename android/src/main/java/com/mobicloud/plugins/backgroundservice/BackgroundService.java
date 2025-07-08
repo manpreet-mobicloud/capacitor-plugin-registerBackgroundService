@@ -1248,7 +1248,7 @@ public class BackgroundService extends Service {
 
           sendLog("MQTT messageArrived"+msg);
 
-          // 🛡️ Deduplication: Skip if same as last processed
+//           🛡️ Deduplication: Skip if same as last processed
           if (msg.equals(lastProcessedPayload)) {
             Log.w(TAG, "Duplicate MQTT message detected — skipping.");
             return;
@@ -1258,6 +1258,8 @@ public class BackgroundService extends Service {
           try {
             JSONObject json = new JSONObject(msg);
             String packetType = json.getString("packetType");
+            Log.d(TAG,"Packet Type: "+packetType);
+
             String regulatorId = json.getString("Regulatorid ");
             String data = json.getString("Data");
             String sha = json.getString("SHA");
@@ -1276,31 +1278,34 @@ public class BackgroundService extends Service {
             BluetoothGattCharacteristic characteristic = BleClientHolder.getRxCharacteristic();
 
             handler.postDelayed(() -> {
-              if (!isAuthDlWrittenToDevice && "AuthDL".equalsIgnoreCase(packetType)) {
+              if("AuthDL".equalsIgnoreCase(packetType)) {
                 Log.d(TAG, "Received Auth DL: " + formatted);
                 sendLog("Received Auth DL: " + formatted);
-                if (gatt == null || characteristic == null) {
-                  Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
-                  return;
+
+                if (!isAuthDlWrittenToDevice) {
+                  if (gatt == null || characteristic == null) {
+                    Log.w(TAG, "BLE not ready. Cannot send Auth DL now.");
+                    return;
+                  }
+
+                  boolean bret = writeDataToDevice(characteristic, formatted);
+
+                  if (bret) {
+                    isAuthDlWrittenToDevice = true;
+                    authSentAfterReconnect = true;
+                    notificationReceived = false;
+
+                    Log.d(TAG, "Auth DL written to device. Waiting for notification...");
+                    sendLog("Auth DL written to device. Waiting for notification...");
+                    // ❌ No fallback timer here — notification MUST be received to continue
+                  } else {
+                    isAuthDlWrittenToDevice = false;
+                    authSentAfterReconnect = false;
+                    Log.d(TAG, "Failed to write Auth DL.");
+                  }
                 }
-
-                boolean bret = writeDataToDevice(characteristic, formatted);
-
-                if (bret) {
-                  isAuthDlWrittenToDevice = true;
-                  authSentAfterReconnect = true;
-                  notificationReceived = false;
-
-                  Log.d(TAG, "Auth DL written to device. Waiting for notification...");
-                  sendLog("Auth DL written to device. Waiting for notification...");
-                  // ❌ No fallback timer here — notification MUST be received to continue
-                } else {
-                  isAuthDlWrittenToDevice = false;
-                  authSentAfterReconnect = false;
-                  Log.d(TAG, "Failed to write Auth DL.");
-                }
-
-              } else {
+              }
+               else {
                 Log.d(TAG, "Received Normal DL. Adding to queue.");
                 sendLog("Received Normal DL. Adding to queue: " + formatted);
                 normalDlQueue.add(formatted);
@@ -1319,6 +1324,7 @@ public class BackgroundService extends Service {
         public void deliveryComplete(IMqttDeliveryToken token) {
           Log.d(TAG, "Message delivery complete");
           sendLog("Message delivery complete");
+          lastProcessedPayload = null;
         }
       });
 
