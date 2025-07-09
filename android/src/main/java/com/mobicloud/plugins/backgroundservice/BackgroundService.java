@@ -143,6 +143,9 @@ public class BackgroundService extends Service {
   private static String TOPIC_to_Publish = " ";
 
   private static String TOPIC_to_Subscribe= " ";
+
+  private static String TOPIC_TO_AUTH_Subscribe = " ";
+
   private static String BASE_URL = "";
   private static String BASIC_AUTH = "";
   private static String DEVICE_UUID = "";
@@ -273,6 +276,8 @@ public class BackgroundService extends Service {
               public void onSuccess(IMqttToken asyncActionToken) {
                 Log.d(TAG, "Connected to broker");
                 sendLog("Connected to broker");
+
+                subscribeToAuthTopic(TOPIC_TO_AUTH_Subscribe,null);
 
                 subscribeToTopic(TOPIC_to_Subscribe,null);
 
@@ -1180,7 +1185,9 @@ public class BackgroundService extends Service {
     String clientId = prefs.getString("mqtt_client_id", null);
 
     if (clientId == null) {
-      clientId = "client_" + UUID.randomUUID().toString();
+//      clientId = "client_" + UUID.randomUUID().toString();
+      clientId = "client_"+ Settings.Secure.getString(getAppContext().getContentResolver(),Settings.Secure.ANDROID_ID);
+
       prefs.edit().putString("mqtt_client_id", clientId).apply();
     }
 
@@ -1192,13 +1199,14 @@ public class BackgroundService extends Service {
       return;
     }
 
-    mqttAndroidClient = new MqttAndroidClient(getAppContext(), MQTT_URL, clientId, Ack.AUTO_ACK,null,false,1000);
+    Log.d(TAG,"MQTT Client ID is: "+clientId);
+    mqttAndroidClient = new MqttAndroidClient(getAppContext(), MQTT_URL, clientId, Ack.AUTO_ACK,null,true,1000);
     MqttClientHolder.setClient(mqttAndroidClient);
 
     MqttConnectOptions options = new MqttConnectOptions();
     options.setAutomaticReconnect(true);
     options.setCleanSession(true);
-    options.setKeepAliveInterval(60);
+    options.setKeepAliveInterval(20);
     options.setUserName(MQTT_USERNAME);
     options.setPassword(MQTT_Password.toCharArray());
 
@@ -1208,7 +1216,7 @@ public class BackgroundService extends Service {
         Log.d(TAG, "Connected to broker");
         sendLog("Connected to broker");
 
-        subscribeToTopic(TOPIC_to_Subscribe,null);
+//        subscribeToTopic(TOPIC_to_Subscribe,null);
 
         // Also push stored BLE messages
         Set<String> stored = getStoredNotifications();
@@ -1330,6 +1338,41 @@ public class BackgroundService extends Service {
 
       isMqttCallbackSet = true;
     }
+  }
+
+  public void subscribeToAuthTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {
+    TOPIC_TO_AUTH_Subscribe = topicToSubscribe;
+    if (mqttAndroidClient == null || !mqttAndroidClient.isConnected()) {
+      Log.e(TAG, "MQTT client is not connected or initialized.");
+//      sendNotification("MQTT client is not connected or initialized.");
+      return;
+    }
+
+    if (topicToSubscribe == null || topicToSubscribe.isEmpty()) {
+      return;
+    }
+
+    mqttAndroidClient.subscribe(topicToSubscribe, 1, getContext(), new IMqttActionListener() {
+      @Override
+      public void onSuccess(IMqttToken asyncActionToken) {
+        Log.d(TAG, "Subscribed to Auth topic: " + topicToSubscribe);
+        System.out.println("Subscribed to Auth topic: " + topicToSubscribe);
+        sendLog("Subscribed to Auth topic: " + topicToSubscribe);
+
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onSuccess();
+        }
+      }
+
+      @Override
+      public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+        Log.e(TAG, "Failed to subscribe to auth topic: " + topicToSubscribe, exception);
+        sendLog("Failed to subscribe to auth topic: " + topicToSubscribe+ exception);
+        if(mqttDownlinkCallBack != null) {
+          mqttDownlinkCallBack.onFailure(exception);
+        }
+      }
+    });
   }
 
   public void subscribeToTopic(String topicToSubscribe, MqttDownlinkCallBack mqttDownlinkCallBack) {

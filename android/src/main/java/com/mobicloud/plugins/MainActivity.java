@@ -1,10 +1,14 @@
 package com.mobicloud.plugins;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
@@ -25,6 +29,7 @@ public class MainActivity extends BridgeActivity {
       if (checkAndRequestPermissions()) {
         // Start the background service if permissions are granted
         startBluetoothBackgroundService();
+        requestBatteryOptimizationExclusion();
       }
     }
   }
@@ -104,5 +109,16 @@ public class MainActivity extends BridgeActivity {
       backToast.show();  // Show message to the user
     }
     backPressedTime = System.currentTimeMillis();  // Record the time of back press
+  }
+
+  private void requestBatteryOptimizationExclusion() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+      if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
+        Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+      }
+    }
   }
 }

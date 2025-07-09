@@ -156,6 +156,34 @@ public class BackgroundServicePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void subscribeToAuthTopic(PluginCall call) {
+      String topicToSubscribe = call.getString("authTopicToSubscribe");
+      JSObject res = new JSObject();
+
+      if (bobj == null) {
+        call.reject("BackgroundService is not initialized. Ensure the service is started.");
+        return;
+      }
+
+      // Register BroadcastReceiver if not already
+
+
+      bobj.subscribeToAuthTopic(topicToSubscribe, new MqttDownlinkCallBack() {
+
+        @Override
+        public void onSuccess() {
+          res.put("isSubscriptionSuccess", true);
+          call.resolve(res);
+        }
+
+        @Override
+        public void onFailure(Throwable exception) {
+          call.reject(exception.toString());
+        }
+      });
+    }
+
+    @PluginMethod
     public void subscribeToTopic(PluginCall call) {
         String topicToSubscribe = call.getString("topicTOSubscribe");
         JSObject res = new JSObject();
